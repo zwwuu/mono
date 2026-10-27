@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-monorepo"
+version = "0.1.0"
+description = "Python monorepo template: several apps sharing common libraries, built to executables with PyInstaller"
+readme = "README.md"
+requires-python = ">=3.10"
+# becomes available to all apps (see README).
+dependencies = ["pypdf>=4"]
+
+# One console command per app: `app-one` etc. after install.
+[project.scripts]
+app-one = "app_one.main:main"
+pdf-form-check = "pdf_form_check.cli:main"
+
+[project.optional-dependencies]
+# Everything needed for development, testing, and building exes.
+# reportlab is only for generating fixture PDFs in the tests.
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "pyinstaller>=6",
+    "reportlab>=4",
+]
+
+# All importable packages live under src/ — shared libraries and apps
+# alike — so one `pip install -e .` makes everything importable, and
+# PyInstaller only needs src/ on its path (see each app's build.py).
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

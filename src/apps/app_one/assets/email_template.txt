@@ -1,0 +1,6 @@
+$greeting,
+
+Here is the $app report for $date.
+
+Status: $status
+All systems nominal.
