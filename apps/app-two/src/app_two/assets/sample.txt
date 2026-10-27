@@ -1,0 +1,2 @@
+This is a bundled asset for app-two.
+It ships inside the exe and is found via common.utils.app_file_path.

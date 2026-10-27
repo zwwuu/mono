@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "py-monorepo"
+version = "0.1.0"
+description = "Python monorepo template: several apps sharing common libraries, built to executables with PyInstaller"
+readme = "README.md"
+requires-python = ">=3.10"
+# Runtime dependencies: none. The shared libraries use only the standard
+# library, so they work with a bare `pip install -e .`.
+dependencies = []
+
+[project.optional-dependencies]
+# Everything needed for development, testing, and building exes.
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "pyinstaller>=6",
+]
+
+# The shared libraries live under src/; each app is its own project
+# under apps/<app>/ with its own pyproject.toml, so `pip install -e .`
+# installs the shared libraries and each app installs from its own
+# folder (see README). PyInstaller only needs the app's src/ on its
+# path (see each app's build.py).
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "app-five"
+description = "Note indexer: indexes a folder of Markdown notes into a JSON index."
+requires-python = ">=3.10"
+# Shared code is not a pip dependency: this app imports `common.*`
+# from the monorepo. Install the template root (or copy src/common/)
+# for a standalone checkout.
+dependencies = []
+dynamic = ["version"]
+
+# The version is read from the app's meta.py, so the name and version
+# stay defined once (see src/app_five/meta.py).
+[tool.setuptools.dynamic]
+version = {attr = "app_five.meta.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+# Config/assets live inside the app package, so they must be declared
+# as package data or wheels/sdists would ship code without its data.
+[tool.setuptools.package-data]
+app_five = ["config/*", "assets/*"]
+
+[project.scripts]
+app-five = "app_five.__main__:main"

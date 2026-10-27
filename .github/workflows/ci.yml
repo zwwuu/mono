@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: pip install .[dev] apps/app-one apps/app-two apps/app-three apps/app-four apps/app-five
+      - name: Lint
+        run: ruff check src tests scripts apps
+      - name: Format check
+        run: ruff format --check src tests scripts apps
+      - name: Test
+        run: pytest
+      - name: Build all apps
+        run: python scripts/build.py
+      - name: Smoke-test the installed apps
+        # Runs from the repo root, where neither src/ nor any app's
+        # src/ is on sys.path, so this imports the installed copies
+        # from site-packages — proof that a plain `pip install`
+        # resolves the apps' data.
+        run: |
+          python -c "from common.utils import load_app_config; assert load_app_config('app-two', defaults={})['pattern'] == '*.txt'"
+          ./dist/app-one/app-one --version
+          ./dist/app-two/app-two --version
+          ./dist/app-three/app-three --version
+          ./dist/app-four/app-four --version
+          ./dist/app-five/app-five --version
+          ls dist/app-one-*.zip dist/app-two-*.zip dist/app-three-*.zip dist/app-four-*.zip dist/app-five-*.zip

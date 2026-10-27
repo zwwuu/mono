@@ -1,0 +1,6 @@
+# Exclude patterns for app-four, one per line (fnmatch against each
+# path part relative to the scanned folder). Lines starting with #
+# are comments.
+.git
+__pycache__
+*.pyc
