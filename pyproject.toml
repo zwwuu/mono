@@ -43,7 +43,7 @@ where = ["src"]
 # work either way.)
 [tool.setuptools.package-data]
 app_one = ["config/*", "assets/*", "disclaimer.txt"]
-app_two = ["config/*", "assets/*", "templates/**"]
+app_two = ["config/*", "assets/*"]
 app_three = ["config/*", "assets/*"]
 app_four = ["config/*", "assets/*"]
 app_five = ["config/*", "assets/*"]

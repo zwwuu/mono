@@ -40,18 +40,6 @@ def main(argv=None):
         log.info("bundled asset found: %s", sample)
     else:
         log.warning("bundled asset sample.txt not found")
-
-    # Template files with arbitrary names/folders, bundled via
-    # EXTRA_DATAS in the app's build.py and located with app_file_path.
-    for template in (
-        ("templates", "monthly-summary.xlsx"),
-        ("templates", "letters", "welcome-letter.docx"),
-    ):
-        path = app_file_path(APP_NAME, *template)
-        if path:
-            log.info("bundled template found: %s", path)
-        else:
-            log.warning("bundled template missing: %s", "/".join(template))
     return 0
 
 

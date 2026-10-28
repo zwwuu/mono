@@ -28,7 +28,7 @@ mono/
 │   ├── app_four/build.py   # same
 │   ├── app_five/build.py   # same
 │   └── pdf_form_check/build.py  # same
-└── tests/                  # build tests + pdf-form-check's tests
+└── tests/                  # build tests + per-app test dirs (pdf_form_check/)
 ```
 
 ## Quickstart
@@ -185,30 +185,9 @@ one app's template might be `quarterly-report.xlsx`, another's a
 `letters/` folder of `.docx` files. Those go through `EXTRA_DATAS`
 in the app's `build.py` subclass — `(source, dest)` pairs, source
 relative to the repo root, directories bundled recursively, dest
-flat next to the exe:
-
-```python
-class AppTwoBuild(DefaultBuildConfig):
-    PACKAGE = "app_two"
-    EXTRA_DATAS = (("src/app_two/templates", "templates"),)
-```
-
-At runtime, locate them with `common.utils.app_file_path()`, which
-takes any path inside the app's bundle instead of assuming `assets/`:
-
-```python
-path = app_file_path(APP_NAME, "templates", "monthly-summary.xlsx")
-# from source: src/app_two/templates/monthly-summary.xlsx
-# frozen:      templates/monthly-summary.xlsx next to the exe
-```
-
-Template folders inside the app package also belong in
-that app's `[tool.setuptools.package-data]` entry in
-`pyproject.toml`, so wheels and sdists ship them — app-two's entry
-covers `templates/**`. app-two demonstrates the whole flow: its
-`templates/` folder holds `monthly-summary.xlsx` and
-`letters/welcome-letter.docx`, and running it logs both resolved
-paths.
+flat next to the exe. At runtime, locate them with
+`common.utils.app_file_path()`, which takes any path inside the
+app's bundle instead of assuming `assets/`.
 
 Single files work the same way — app-one bundles one standalone txt
 file as its report footer:
@@ -219,8 +198,10 @@ class AppOneBuild(DefaultBuildConfig):
 ```
 
 and reads it with `app_file_path(APP_NAME, "disclaimer.txt")`.
-Single files belong in the app's `package-data` entry too
-(app-one's covers `disclaimer.txt`).
+Template files and folders inside the app package also belong in
+that app's `[tool.setuptools.package-data]` entry in
+`pyproject.toml`, so wheels and sdists ship them — app-one's entry
+covers `disclaimer.txt`.
 
 ## pdf-form-check
 
@@ -257,12 +238,14 @@ segment (`Section.A1`), then case-insensitive.
 Edge cases: fields that exist but are empty mean "no" (exit 0), not
 an error. A match in one field wins over a missing field. Signed
 PDFs parse normally; the signature field is ignored and signature
-validity is not checked. Encrypted PDFs are tried with an empty
+validity is not checked. The test builds a signature field with
+pypdf (placeholders, not a real signature), so no binary fixture
+is needed. Encrypted PDFs are tried with an empty
 password; anything still locked is exit 4.
 
 Its code lives in `src/pdf_form_check/` (one module per job:
 reader, resolver, matcher, checker, CLI) and its own tests live in
-`tests/` alongside the build tests (`test_matcher.py`,
+`tests/pdf_form_check/` (`test_matcher.py`,
 `test_checker.py`, `test_cli.py`, `test_field_resolver.py`,
 `pdf_factory.py`, `fixtures/`).
 
@@ -304,4 +287,6 @@ output, using fixture apps in tmp dirs — never the shipped sample
 apps or shared libraries — so they stay valid whatever apps the
 repo holds. pdf-form-check is the exception: it has real app tests
 (checker, matcher, resolver, CLI) because its exit-code contract is
-the feature, and those live in `tests/` too.
+the feature, and those live in `tests/pdf_form_check/` — app tests
+are grouped by directory (`tests/<package>/`), while the build tests
+stay at `tests/` root.

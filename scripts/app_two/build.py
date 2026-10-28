@@ -26,9 +26,6 @@ DefaultBuildConfig = _module.DefaultBuildConfig
 
 class AppTwoBuild(DefaultBuildConfig):
     PACKAGE = "app_two"
-    # Arbitrary template files/folders, placed flat next to the exe.
-    # Directories are bundled recursively; any name works per app.
-    EXTRA_DATAS = (("src/app_two/templates", "templates"),)
 
 
 if __name__ == "__main__":
