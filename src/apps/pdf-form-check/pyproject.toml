@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pdf-form-check"
+version = "0.1.0"
+description = "Check a PDF form for 'yes' in fields A1/A2 and report the result via exit code"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["pypdf>=4"]
+
+[project.scripts]
+pdf-form-check = "pdf_form_check.cli:main"
+
+[project.optional-dependencies]
+# reportlab is only for generating fixture PDFs in the tests.
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+    "reportlab>=4",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
