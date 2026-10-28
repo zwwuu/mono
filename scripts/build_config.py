@@ -1,6 +1,6 @@
 """Default PyInstaller build config — subclass it per app.
 
-Each app's build script (apps/<app>/build.py) is a tiny subclass that
+Each app's build script (scripts/<package>/build.py) is a tiny subclass that
 sets PACKAGE and inherits everything else: the
 PyInstaller command line, the zip bundle, and the --clean /
 --no-zip / --name / --distpath / --workpath flags. The app name is
@@ -17,11 +17,11 @@ so the name is defined once. Override a class attribute to customize an app:
                     template .docx/.xlsx files or template folders with
                     arbitrary names, e.g. ("src/app_two/templates",
                     "templates"). (source, dest) pairs, source relative
-                    to the app folder; directories are bundled
+                    to the repo root; directories are bundled
                     recursively. A pair means "this source ends up at
                     dest, flat next to the exe". Locate them at runtime
                     with common.utils.app_file_path().
-    ICON:           path to a .ico file, relative to the app folder (or None)
+    ICON:           path to a .ico file, relative to the repo root (or None)
 
 Data placement: PyInstaller forces --add-data into _internal, so
 the build never uses it. After PyInstaller runs, the data folders
@@ -69,10 +69,7 @@ class DefaultBuildConfig:
             raise TypeError(f"{type(self).__name__} must set PACKAGE")
         # This file lives in scripts/, so its parent is the repo root.
         self.root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        # Each app lives in its own folder, apps/<app>/, named after the
-        # app (package with underscores turned into hyphens).
-        self.app_dir = os.path.join(self.root, "apps", self.PACKAGE.replace("_", "-"))
-        self.src_dir = os.path.join(self.app_dir, "src")
+        self.src_dir = os.path.join(self.root, "src")
         self.package_dir = os.path.join(self.src_dir, self.PACKAGE)
         if self.APP_NAME is None:
             # The app's meta.py APP_NAME is the single source of truth; a
@@ -101,7 +98,7 @@ class DefaultBuildConfig:
             if os.path.isdir(source):
                 targets.append((source, folder))
         for source, dest in self.EXTRA_DATAS:
-            targets.append((os.path.join(self.app_dir, source), dest))
+            targets.append((os.path.join(self.root, source), dest))
         for source, dest in targets:
             if not os.path.exists(source):
                 raise SystemExit(f"data file not found: {source}")
@@ -193,7 +190,7 @@ class DefaultBuildConfig:
         for module in self.HIDDEN_IMPORTS:
             cmd += ["--hidden-import", module]
         if self.ICON:
-            cmd += ["--icon", os.path.join(self.app_dir, self.ICON)]
+            cmd += ["--icon", os.path.join(self.root, self.ICON)]
         cmd += [
             "--distpath",
             args.distpath,

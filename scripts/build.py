@@ -7,11 +7,12 @@ Usage (from anywhere):
     python scripts/build.py all --clean
     python scripts/build.py app-one --no-zip
 
-Each app's build script (apps/<app>/build.py) is a small
+Each app's build script (scripts/<package>/build.py) is a small
 subclass of the default build config in scripts/build_config.py; this
 script just discovers and runs them. Apps are discovered by scanning
-apps/*/build.py, so adding a new app needs no edit here. The app
-name is the app folder's name (apps/app-one -> app-one).
+scripts/*/build.py, so adding a new app needs no edit here. The app
+name is the package dir with underscores turned into hyphens
+(app_one -> app-one), following the repo's naming convention.
 Options are forwarded to the per-app scripts; for anything else
 (e.g. --name, --distpath) run the app's build script directly.
 """
@@ -22,23 +23,24 @@ import subprocess
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-APPS_DIR = os.path.join(ROOT, "apps")
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def discover_apps():
-    """App names: every apps/<app>/build.py, sorted."""
-    if not os.path.isdir(APPS_DIR):
+    """App names: every scripts/<package>/build.py, sorted."""
+    if not os.path.isdir(SCRIPTS_DIR):
         return []
     return sorted(
-        entry
-        for entry in os.listdir(APPS_DIR)
-        if os.path.isfile(os.path.join(APPS_DIR, entry, "build.py"))
+        entry.replace("_", "-")
+        for entry in os.listdir(SCRIPTS_DIR)
+        if os.path.isfile(os.path.join(SCRIPTS_DIR, entry, "build.py"))
     )
 
 
 def build(name, clean, no_zip):
     """Run one app's build script; return its exit code."""
-    cmd = [sys.executable, os.path.join(APPS_DIR, name, "build.py")]
+    package = name.replace("-", "_")
+    cmd = [sys.executable, os.path.join(SCRIPTS_DIR, package, "build.py")]
     if clean:
         cmd.append("--clean")
     if no_zip:
@@ -65,7 +67,7 @@ def main(argv=None):
 
     names = apps if args.app == "all" else [args.app]
     if not names:
-        raise SystemExit("no apps found under apps/*/build.py")
+        raise SystemExit("no apps found under scripts/*/build.py")
     failures = [name for name in names if build(name, args.clean, args.no_zip) != 0]
     if failures:
         raise SystemExit(f"failed: {', '.join(failures)}")

@@ -13,16 +13,17 @@ build_module = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build_module)
 
 
-def test_discover_apps_lists_only_app_dirs_with_build_py(tmp_path, monkeypatch):
-    apps = tmp_path / "apps"
-    (apps / "alpha").mkdir(parents=True)
-    (apps / "alpha" / "build.py").write_text("", encoding="utf-8")
-    (apps / "beta-app").mkdir()
-    (apps / "beta-app" / "build.py").write_text("", encoding="utf-8")
-    (apps / "gamma").mkdir()
-    (apps / "build.py").write_text("", encoding="utf-8")
-    (apps / "notes.txt").write_text("", encoding="utf-8")
-    monkeypatch.setattr(build_module, "APPS_DIR", str(apps))
+def test_discover_apps_lists_only_package_dirs_with_build_py(tmp_path, monkeypatch):
+    scripts = tmp_path / "scripts"
+    (scripts / "alpha").mkdir(parents=True)
+    (scripts / "alpha" / "build.py").write_text("", encoding="utf-8")
+    (scripts / "beta_app").mkdir()
+    (scripts / "beta_app" / "build.py").write_text("", encoding="utf-8")
+    (scripts / "gamma").mkdir()
+    (scripts / "build.py").write_text("", encoding="utf-8")
+    (scripts / "build_config.py").write_text("", encoding="utf-8")
+    (scripts / "notes.txt").write_text("", encoding="utf-8")
+    monkeypatch.setattr(build_module, "SCRIPTS_DIR", str(scripts))
     assert build_module.discover_apps() == ["alpha", "beta-app"]
 
 
@@ -34,11 +35,11 @@ def test_build_forwards_flags_to_app_script(tmp_path, monkeypatch):
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
-    monkeypatch.setattr(build_module, "APPS_DIR", str(tmp_path))
+    monkeypatch.setattr(build_module, "SCRIPTS_DIR", str(tmp_path))
     assert build_module.build("beta-app", clean=True, no_zip=True) == 0
     cmd = seen[0]
     assert cmd[0] == sys.executable
-    assert cmd[1] == str(tmp_path / "beta-app" / "build.py")
+    assert cmd[1] == str(tmp_path / "beta_app" / "build.py")
     assert "--clean" in cmd and "--no-zip" in cmd
 
 

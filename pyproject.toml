@@ -8,25 +8,45 @@ version = "0.1.0"
 description = "Python monorepo template: several apps sharing common libraries, built to executables with PyInstaller"
 readme = "README.md"
 requires-python = ">=3.10"
-# Runtime dependencies: none. The shared libraries use only the standard
-# library, so they work with a bare `pip install -e .`.
-dependencies = []
+# pdf-form-check needs pypdf; a third-party dependency added here
+# becomes available to all apps (see README).
+dependencies = ["pypdf>=4"]
+
+# One console command per app: `app-one` etc. after install.
+[project.scripts]
+app-one = "app_one.__main__:main"
+app-two = "app_two.__main__:main"
+app-three = "app_three.__main__:main"
+app-four = "app_four.__main__:main"
+app-five = "app_five.__main__:main"
+pdf-form-check = "pdf_form_check.cli:main"
 
 [project.optional-dependencies]
 # Everything needed for development, testing, and building exes.
+# reportlab is only for generating fixture PDFs in the tests.
 dev = [
     "pytest>=8",
     "ruff>=0.6",
     "pyinstaller>=6",
+    "reportlab>=4",
 ]
 
-# The shared libraries live under src/; each app is its own project
-# under apps/<app>/ with its own pyproject.toml, so `pip install -e .`
-# installs the shared libraries and each app installs from its own
-# folder (see README). PyInstaller only needs the app's src/ on its
-# path (see each app's build.py).
+# All importable packages live under src/ — shared libraries and apps
+# alike — so one `pip install -e .` makes everything importable, and
+# PyInstaller only needs src/ on its path (see each app's build.py).
 [tool.setuptools.packages.find]
 where = ["src"]
+
+# Config/assets/templates live inside each app package, so they must
+# be declared as package data or wheels/sdists would ship code
+# without its data. (Editable installs map src/ directly, so they
+# work either way.)
+[tool.setuptools.package-data]
+app_one = ["config/*", "assets/*", "disclaimer.txt"]
+app_two = ["config/*", "assets/*", "templates/**"]
+app_three = ["config/*", "assets/*"]
+app_four = ["config/*", "assets/*"]
+app_five = ["config/*", "assets/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

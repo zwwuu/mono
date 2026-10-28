@@ -38,13 +38,13 @@ class ExplicitBuild(build_config.DefaultBuildConfig):
 
 
 def make_fixture(tmp_path, version="1.2.3"):
-    """A minimal fake app repo: root/apps/fake-app/src/fake_app/ with data folders.
+    """A minimal fake app repo: root/src/fake_app/ with data folders.
 
     meta.py holds the constants; __init__.py is a stub — the build
     reads meta.py, never __init__.py.
     """
     root = tmp_path / "repo"
-    pkg = root / "apps" / "fake-app" / "src" / "fake_app"
+    pkg = root / "src" / "fake_app"
     (pkg / "config").mkdir(parents=True, exist_ok=True)
     (pkg / "assets").mkdir(parents=True, exist_ok=True)
     (pkg / "meta.py").write_text(
@@ -62,8 +62,7 @@ def fixture_builder(tmp_path, cls=FixtureBuild, **overrides):
     root, pkg = make_fixture(tmp_path)
     builder = cls()
     builder.root = str(root)
-    builder.app_dir = str(pkg.parents[1])
-    builder.src_dir = str(pkg.parent)
+    builder.src_dir = str(root / "src")
     builder.package_dir = str(pkg)
     for key, value in overrides.items():
         setattr(builder, key, value)
@@ -90,14 +89,14 @@ def test_read_version_missing_raises(tmp_path):
 
 
 def make_fallback_fixture(tmp_path, meta_text):
-    """A fake app package at tmp_path/apps/fake-app/src/fake_app/ for fallback tests.
+    """A fake app package at tmp_path/src/fake_app/ for fallback tests.
 
     FallbackBuild resolves its dirs from build_config.py's location, so
     these tests point the module at tmp_path to make it read here.
     meta.py holds the given text; __init__.py is a stub — the build
     reads meta.py, never __init__.py.
     """
-    pkg = tmp_path / "apps" / "fake-app" / "src" / "fake_app"
+    pkg = tmp_path / "src" / "fake_app"
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "meta.py").write_text(meta_text, encoding="utf-8")
     (pkg / "__init__.py").write_text('"""Fixture package init."""\n', encoding="utf-8")
@@ -137,7 +136,7 @@ def test_app_name_missing_meta_raises(tmp_path, monkeypatch):
         FallbackBuild()
 
 
-def test_explicit_app_name_wins_over_package_init(tmp_path):
+def test_explicit_app_name_wins_over_package_meta(tmp_path):
     builder = fixture_builder(tmp_path, cls=ExplicitBuild)
     assert builder.APP_NAME == "other-app"
 
@@ -155,7 +154,7 @@ def test_zip_roots_entries_at_folder_name(tmp_path):
 
 def test_copy_data_files_places_flat(tmp_path):
     builder = fixture_builder(tmp_path, EXTRA_DATAS=(("src/fake_app/extra.txt", "extra.txt"),))
-    (Path(builder.package_dir) / "extra.txt").write_text("extra", encoding="utf-8")
+    (Path(builder.root) / "src" / "fake_app" / "extra.txt").write_text("extra", encoding="utf-8")
     out = tmp_path / "fake-app"
     (out / "config").mkdir(parents=True)
     (out / "config" / "stale.txt").write_text("stale", encoding="utf-8")
@@ -199,7 +198,7 @@ def test_build_command_uses_onedir_and_no_add_data(tmp_path):
     cmd = builder.build_command(builder.parse_args([]))
     assert "--add-data" not in cmd
     assert "--onedir" in cmd
-    assert cmd[cmd.index("--paths") + 1] == str(Path(builder.app_dir) / "src")
+    assert cmd[cmd.index("--paths") + 1] == str(Path(builder.root) / "src")
     assert cmd[-1] == str(Path(builder.package_dir) / "__main__.py")
 
 
@@ -215,7 +214,7 @@ def test_copy_data_files_creates_parent_dirs_for_file_dest(tmp_path):
     builder = fixture_builder(
         tmp_path, EXTRA_DATAS=(("src/fake_app/extra.txt", "sub/dir/extra.txt"),)
     )
-    (Path(builder.package_dir) / "extra.txt").write_text("extra", encoding="utf-8")
+    (Path(builder.root) / "src" / "fake_app" / "extra.txt").write_text("extra", encoding="utf-8")
     out = tmp_path / "fake-app"
     builder.copy_data_files(str(out))
     assert (out / "sub" / "dir" / "extra.txt").read_text(encoding="utf-8") == "extra"

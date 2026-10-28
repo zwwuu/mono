@@ -1,32 +1,34 @@
-# Python monorepo template
+# mono
 
 Several apps, one repo, shared code, executables out the other end.
 
 ```
-py-monorepo/
-├── .github/workflows/ci.yml  # CI: lint, format check, tests, build-all
-├── pyproject.toml          # shared libraries + dev tooling (apps have their own)
+mono/
+├── pyproject.toml          # the only build/dependency config
 ├── src/
-│   └── common/             # shared libraries (stdlib-only)
-│       ├── logging/        # shared logger (stdlib logging)
-│       ├── mail/           # shared SMTP mail client
-│       └── utils/          # shared helpers: paths, config, json, retry
-├── apps/
-│   ├── app-one/            # app 1: report sender
-│   │   ├── pyproject.toml        # this app's own project file
-│   │   ├── build.py              # builds app-one
-│   │   └── src/app_one/          # the app package
-│   │       ├── meta.py           # APP_NAME + __version__ (constants only)
-│   │       ├── config/config.json  # the app's own config (bundled + overridable)
-│   │       └── assets/           # the app's own bundled files
-│   ├── app-two/            # app 2: file lister (same shape)
-│   ├── app-three/          # app 3: URL health check (same shape)
-│   ├── app-four/           # app 4: duplicate-file finder (same shape)
-│   └── app-five/           # app 5: note indexer (multi-module)
+│   ├── common/             # shared libraries (stdlib-only)
+│   │   ├── logging/        # shared logger (stdlib logging)
+│   │   ├── mail/           # shared SMTP mail client
+│   │   └── utils/          # shared helpers: paths, config, json, retry
+│   ├── app_one/            # app 1: report sender
+│   │   ├── meta.py               # APP_NAME + __version__ (constants only)
+│   │   ├── config/config.json    # the app's own config (bundled + overridable)
+│   │   └── assets/               # the app's own bundled files
+│   ├── app_two/            # app 2: file lister (same shape)
+│   ├── app_three/          # app 3: URL health check (same shape)
+│   ├── app_four/           # app 4: duplicate-file finder (same shape)
+│   ├── app_five/           # app 5: note indexer (multi-module)
+│   └── pdf_form_check/     # app 6: PDF form checker (exit codes)
 ├── scripts/
 │   ├── build_config.py     # DefaultBuildConfig: the shared build logic
-│   └── build.py            # build all apps, or one by name
-└── tests/                  # tests for the build scripts and their output
+│   ├── build.py            # build all apps, or one by name
+│   ├── app_one/build.py    # builds app-one (subclass of the default config)
+│   ├── app_two/build.py    # same
+│   ├── app_three/build.py  # same
+│   ├── app_four/build.py   # same
+│   ├── app_five/build.py   # same
+│   └── pdf_form_check/build.py  # same
+└── tests/                  # build tests + pdf-form-check's tests
 ```
 
 ## Quickstart
@@ -34,14 +36,14 @@ py-monorepo/
 ```bash
 python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"            # shared libraries + dev tooling
-for d in apps/*/; do pip install -e "$d"; done   # every app
+pip install -e ".[dev]"
 
 python -m app_one --dry-run        # or: app-one --dry-run
 python -m app_two                  # or: app-two
 python -m app_three --help         # or: app-three
 python -m app_four --help          # or: app-four
 python -m app_five --help          # or: app-five
+python -m pdf_form_check --help    # or: pdf-form-check
 pytest
 ```
 
@@ -66,6 +68,8 @@ What each sample actually uses:
 - **app-five** (note indexer): logging + utils — indexes a folder
   of Markdown notes into a JSON index, one module per pipeline
   stage (scanner, parser, index).
+- **pdf-form-check**: checks a PDF form's A1/A2 fields for "yes"
+  and reports via exit code — see below.
 
 ## How the pieces fit
 
@@ -76,30 +80,20 @@ They use only the standard library, so they never drag in new
 dependencies. When a library needs a third-party package, add it to
 `dependencies` in `pyproject.toml` — it becomes available to all apps.
 
-**Apps** are self-contained project folders under `apps/`
-(`apps/app-one`, ..., `apps/app-five`), each with its own
-`pyproject.toml`, its own `build.py`, and `src/<package>/` holding
-the package — a `meta.py` with its name and version, a `__main__.py`
-exposing `main()`, plus its own `config/` and `assets/`. That gives
-you three ways to run them: `python -m app_one` (once installed),
-the `app-one` console command, and the PyInstaller exe. App code
-uses absolute imports only
+**Apps** are also packages under `src/` (`app_one`, `app_two`,
+`app_three`, `app_four`, `app_five`, `pdf_form_check`), each with a
+`meta.py` holding its name and version, a `__main__.py` exposing
+`main()`, plus its own `config/` and `assets/` where it needs them.
+That gives you three ways to run them: `python -m app_one`, the
+`app-one` console command, and the PyInstaller exe. App code uses
+absolute imports only
 (`from app_one.report import ...`, never `from .report import ...`),
 because PyInstaller runs `__main__.py` as a plain script, where
 relative imports fail.
 
-Copying one app folder out gives you a complete project file-wise —
-pyproject, build script, package — but the app still imports
-`common.*` from the monorepo, and its `build.py` still loads
-`scripts/build_config.py` from the template root. A standalone copy
-also needs `src/common/` (to run) and `scripts/build_config.py` (to
-build) alongside it. No shared code is vendored into app folders,
-so it stays defined once.
-
 **Per-app config and data** live inside the app's own package:
-`apps/<app>/src/<package>/config/` and
-`apps/<app>/src/<package>/assets/` (package = app name with `-`
-replaced by `_`). Onedir builds copy the app's
+`src/<package>/config/` and `src/<package>/assets/` (package = app
+name with `-` replaced by `_`). Onedir builds copy the app's
 `DATA_FOLDERS` flat next to the exe (`config/`, `assets/`).
 `common.utils.load_app_config` / `common.utils.app_file_path` find
 them at runtime whether the app runs from source or frozen. The
@@ -111,8 +105,8 @@ name is special: they're just the defaults in
 attribute to use any folder names (at runtime,
 `load_app_config(..., folder=...)` and `app_file_path()` take the
 folder as a parameter). Because the data lives in the package, it is
-declared as `package-data` in the app's own `pyproject.toml` so
-wheels and sdists ship it too.
+declared as `package-data` in `pyproject.toml` so wheels and sdists
+ship it too.
 
 ## Config precedence
 
@@ -122,7 +116,7 @@ wheels and sdists ship it too.
 2. The first config file found:
    - a directory passed as `search_dirs` (tests, `--config-dir`),
    - when frozen: `config/` next to the exe (user-editable),
-   - from source: `apps/<app>/src/<package>/config/config.json`,
+   - from source: `src/<package>/config/config.json`,
    - installed: `site-packages/<package>/config/config.json`
      (pip-installed apps, when there is no source checkout).
 
@@ -142,10 +136,10 @@ python scripts/build.py app-one         # build just app-one
 python scripts/build.py all --clean     # wipe build cache first
 ```
 
-The central script discovers apps by scanning `apps/*/build.py` and
+The central script discovers apps by scanning `scripts/*/build.py` and
 runs the matching per-app build script(s), so adding an app needs no
 edit here. You can also run an app's build script directly
-(`python apps/app-one/build.py`) — it takes extra options
+(`python scripts/app_one/build.py`) — it takes extra options
 the central script doesn't forward, like `--name` and `--distpath`.
 
 The build itself is object-oriented: `scripts/build_config.py` defines
@@ -159,8 +153,7 @@ names — instead of editing the PyInstaller command line.
 
 On Windows the output is `dist/app-one/app-one.exe`. There are no
 `.spec` files: each app's `build.py` passes everything PyInstaller
-needs on the command line (`--paths` pointing at the app's `src/`),
-then copies the app's
+needs on the command line (`--paths src/`), then copies the app's
 data flat next to the exe (PyInstaller would force `--add-data`
 into `_internal`, so the build doesn't use it).
 
@@ -191,7 +184,7 @@ PyInstaller notes that bite people:
 one app's template might be `quarterly-report.xlsx`, another's a
 `letters/` folder of `.docx` files. Those go through `EXTRA_DATAS`
 in the app's `build.py` subclass — `(source, dest)` pairs, source
-relative to the app folder, directories bundled recursively, dest
+relative to the repo root, directories bundled recursively, dest
 flat next to the exe:
 
 ```python
@@ -205,12 +198,12 @@ takes any path inside the app's bundle instead of assuming `assets/`:
 
 ```python
 path = app_file_path(APP_NAME, "templates", "monthly-summary.xlsx")
-# from source: apps/app-two/src/app_two/templates/monthly-summary.xlsx
+# from source: src/app_two/templates/monthly-summary.xlsx
 # frozen:      templates/monthly-summary.xlsx next to the exe
 ```
 
 Template folders inside the app package also belong in
-that app's `[tool.setuptools.package-data]` entry in its own
+that app's `[tool.setuptools.package-data]` entry in
 `pyproject.toml`, so wheels and sdists ship them — app-two's entry
 covers `templates/**`. app-two demonstrates the whole flow: its
 `templates/` folder holds `monthly-summary.xlsx` and
@@ -229,44 +222,86 @@ and reads it with `app_file_path(APP_NAME, "disclaimer.txt")`.
 Single files belong in the app's `package-data` entry too
 (app-one's covers `disclaimer.txt`).
 
+## pdf-form-check
+
+Checks a PDF form's A1/A2 fields for "yes" and reports via exit
+code — meant to be consumed by another program. The exit code is
+the result; stdout carries one short line, errors go to stderr.
+
+```bash
+pdf-form-check form.pdf; echo $?
+# MATCH: A1=yes   (exit 1)
+```
+
+| Code | Meaning |
+| ---- | ------- |
+| 0 | `NO_MATCH` — the form parsed, neither checked field is "yes" |
+| 1 | `MATCH` — at least one checked field is "yes" |
+| 2 | `USAGE` — bad command line |
+| 3 | `INPUT_ERROR` — file missing, not a file, or unreadable |
+| 4 | `MALFORMED` — not a PDF, corrupted/truncated, empty, or encrypted |
+| 5 | `FIELDS_MISSING` — the PDF parsed, but a checked field is not in the form |
+
+0 is a clean negative, not an error. The failure codes exist so the
+caller can tell "no" apart from "couldn't check": a missing field or
+a corrupt file must never silently read as "no". Only 1 means
+"yes" — 3, 4, and 5 mean "couldn't check" and must not be treated
+as a match.
+
+What counts as "yes": case-insensitive, surrounding whitespace
+ignored, a leading slash stripped (a checked checkbox reports as
+`/Yes` in pypdf). Anything else — `yess`, `on`, `1`, empty — does
+not count. Field names resolve forgivingly: exact, then last
+segment (`Section.A1`), then case-insensitive.
+
+Edge cases: fields that exist but are empty mean "no" (exit 0), not
+an error. A match in one field wins over a missing field. Signed
+PDFs parse normally; the signature field is ignored and signature
+validity is not checked. Encrypted PDFs are tried with an empty
+password; anything still locked is exit 4.
+
+Its code lives in `src/pdf_form_check/` (one module per job:
+reader, resolver, matcher, checker, CLI) and its own tests live in
+`tests/` alongside the build tests (`test_matcher.py`,
+`test_checker.py`, `test_cli.py`, `test_field_resolver.py`,
+`pdf_factory.py`, `fixtures/`).
+
 ## Adding a new app
 
-1. `apps/<app>/` with its own `pyproject.toml` (name, version read
-   from the package's `meta.py`, console command, package data —
-   copy an existing app's and change the names), plus
-   `src/<package>/` (package = app name with `-` replaced by `_`)
+1. `src/<package>/` (package = app name with `-` replaced by `_`)
    with `meta.py` (`APP_NAME` and `__version__` — the app's own
    name and version, re-exported by `__init__.py`), `__main__.py`
    (`main()` +
    `if __name__ == "__main__": raise SystemExit(main())`),
    `config/config.json`, and `assets/` if it needs bundled files.
-2. `apps/<app>/build.py` (copy an existing one, change
+2. `scripts/<package>/build.py` (copy an existing one, change
    `PACKAGE`). The central `scripts/build.py` picks it up
    automatically — no edit needed there. Override a
    `DefaultBuildConfig` attribute in the subclass if the app needs
    something special (windowed, hidden imports, extra data, icon,
-   folder names). Then install it with
-   `pip install -e apps/<app>`.
+   folder names).
+3. A `[project.scripts]` entry in `pyproject.toml` (optional), plus a
+   `[tool.setuptools.package-data]` entry if the app has config/assets
+   (copy an existing app's line).
 
 ## Adding a new shared library
 
 1. `src/common/<lib>/` with `__init__.py` re-exporting its public API.
 2. Import it from any app. No `pyproject.toml` change needed unless it
-   adds a dependency — then add it to `dependencies` in the root
-   `pyproject.toml` (all apps) or document it as app-specific.
+   adds a dependency — then add it to `dependencies` (all apps) or
+   document it as app-specific.
 
 ## Tests
 
 ```bash
-pytest            # tests/ cover the build scripts and their output
-ruff check src tests scripts apps
-ruff format --check src tests scripts apps
+pytest            # build tests (fixtures) + pdf-form-check's tests
+ruff check src tests scripts
+ruff format --check src tests scripts
 ```
 
-Tests deliberately cover only the build scripts and their output,
-using fixture apps in tmp dirs — never the shipped sample apps or
-shared libraries — so they stay valid whatever apps the template
-holds. The sample apps and libraries are examples to replace, not
-code the suite pins down.
-# mono
-# mono
+The build tests deliberately cover only the build scripts and their
+output, using fixture apps in tmp dirs — never the shipped sample
+apps or shared libraries — so they stay valid whatever apps the
+repo holds. pdf-form-check is the exception: it has real app tests
+(checker, matcher, resolver, CLI) because its exit-code contract is
+the feature, and those live in `tests/` too.

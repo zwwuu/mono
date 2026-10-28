@@ -8,24 +8,19 @@ override a DefaultBuildConfig attribute — e.g. CONSOLE = False for
 a windowed GUI app, or HIDDEN_IMPORTS = [...] for dynamic imports.
 
 Usage (from anywhere):
-    python apps/app-one/build.py [--clean] [--no-zip]
-    python apps/app-one/build.py --name app-one-dev
+    python scripts/app_one/build.py [--clean] [--no-zip]
+    python scripts/app_one/build.py --name app-one-dev
     python scripts/build.py app-one     # or build every app from the root
 """
 
 import importlib.util
 import os
 
-APP_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(os.path.dirname(APP_DIR))
-_BUILD_CONFIG = os.path.join(REPO_ROOT, "scripts", "build_config.py")
-if not os.path.isfile(_BUILD_CONFIG):
-    raise SystemExit(
-        f"build_config.py not found: {_BUILD_CONFIG} — this build script loads "
-        "the shared config from the template root."
-    )
+SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_spec = importlib.util.spec_from_file_location("build_config", _BUILD_CONFIG)
+_spec = importlib.util.spec_from_file_location(
+    "build_config", os.path.join(SCRIPTS_DIR, "build_config.py")
+)
 _module = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_module)
 DefaultBuildConfig = _module.DefaultBuildConfig
