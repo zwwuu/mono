@@ -30,24 +30,23 @@ def test_discover_apps_lists_only_package_dirs_with_build_py(tmp_path, monkeypat
 def test_build_forwards_flags_to_app_script(tmp_path, monkeypatch):
     seen = []
 
-    def fake_run(cmd, check=False):
-        seen.append(cmd)
+    def fake_run(cmd, check=False, cwd=None):
+        seen.append((cmd, cwd))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     monkeypatch.setattr(build_module, "SCRIPTS_DIR", str(tmp_path))
     assert build_module.build("beta-app", clean=True, no_zip=True) == 0
-    cmd = seen[0]
-    assert cmd[0] == sys.executable
-    assert cmd[1] == str(tmp_path / "beta_app" / "build.py")
-    assert "--clean" in cmd and "--no-zip" in cmd
+    cmd, cwd = seen[0]
+    assert cmd == [sys.executable, "-m", "scripts.beta_app.build", "--clean", "--no-zip"]
+    assert cwd == build_module.ROOT
 
 
 def test_build_returns_nonzero_without_stopping(monkeypatch):
     monkeypatch.setattr(
         build_module.subprocess,
         "run",
-        lambda cmd, check=False: SimpleNamespace(returncode=3),
+        lambda cmd, check=False, **kwargs: SimpleNamespace(returncode=3),
     )
     assert build_module.build("alpha", clean=False, no_zip=False) == 3
 

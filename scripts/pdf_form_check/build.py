@@ -2,17 +2,15 @@
 
 Only PACKAGE lives here. The app name and version are read from
 src/apps/pdf_form_check/meta.py by DefaultBuildConfig, and the entry
-point is src/apps/pdf_form_check/__main__.py. scripts/ is not a
-package, so build_config.py is loaded from the parent directory
-instead of imported relatively.
+point is src/apps/pdf_form_check/__main__.py.
+
+Run as a module from the repo root, never as a file:
+`python -m scripts.pdf_form_check.build` (or via scripts/build.py).
+That is what makes the relative import below work — scripts/ is a
+package, so no sys.path manipulation is needed.
 """
 
-import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-from build_config import DefaultBuildConfig
+from ..build_config import DefaultBuildConfig
 
 
 class PdfFormCheckBuild(DefaultBuildConfig):

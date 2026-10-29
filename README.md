@@ -40,10 +40,12 @@ everywhere, consistently:
 - `scripts/<app>/build.py`: `PACKAGE = "apps.<package>"`, and the
   PyInstaller entry point is `src/apps/<package>/__main__.py`
 
-`scripts/` is not a package, so per-app build scripts load
-`build_config.py` by putting the parent directory on `sys.path`
-— no relative imports (`from ...build_config import ...` cannot
-work from a script run directly).
+`scripts/` is a package (with `__init__.py` files), so per-app
+build modules import `build_config.py` relatively
+(`from ..build_config import DefaultBuildConfig`) — no `sys.path`
+manipulation. Run them as modules from the repo root
+(`python -m scripts.app_one.build`), never as files, and the
+central build runs them the same way.
 
 ## Run from source
 
@@ -85,9 +87,10 @@ exe when frozen, under `src/apps/<package>/` from source.
    `meta.py`), `meta.py` (`APP_NAME`, `__version__`), and
    `__main__.py` (absolute import of the app's `main`, e.g.
    `from apps.<package>.main import main`).
-2. Create `scripts/<package>/build.py` as a `DefaultBuildConfig`
-   subclass with `PACKAGE = "apps.<package>"` (add `EXTRA_DATAS`
-   for files outside `config/` and `assets/`).
+2. Create `scripts/<package>/` with an (empty) `__init__.py` and a
+   `build.py` as a `DefaultBuildConfig` subclass with
+   `PACKAGE = "apps.<package>"` (add `EXTRA_DATAS` for files
+   outside `config/` and `assets/`).
 3. Add its console script to `pyproject.toml` and its tests under
    `tests/<package>/`. Nothing else needs editing: the central
    build discovers apps by scanning `scripts/*/build.py`.

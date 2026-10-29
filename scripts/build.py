@@ -9,12 +9,16 @@ Usage (from anywhere):
 
 Each app's build script (scripts/<package>/build.py) is a small
 subclass of the default build config in scripts/build_config.py; this
-script just discovers and runs them. Apps are discovered by scanning
-scripts/*/build.py, so adding a new app needs no edit here. The app
-name is the package dir with underscores turned into hyphens
-(app_one -> app-one), following the repo's naming convention.
-Options are forwarded to the per-app scripts; for anything else
-(e.g. --name, --distpath) run the app's build script directly.
+script just discovers and runs them as modules
+(`python -m scripts.<package>.build`, with cwd set to the repo
+root). scripts/ is a package, so the per-app modules import
+build_config.py relatively — no sys.path manipulation anywhere.
+Apps are discovered by scanning scripts/*/build.py, so adding a
+new app needs no edit here. The app name is the package dir with
+underscores turned into hyphens (app_one -> app-one), following
+the repo's naming convention. Options are forwarded to the
+per-app scripts; for anything else (e.g. --name, --distpath) run
+the app's build module directly from the repo root.
 """
 
 import argparse
@@ -38,9 +42,9 @@ def discover_apps():
 
 
 def build(name, clean, no_zip):
-    """Run one app's build script; return its exit code."""
+    """Run one app's build module; return its exit code."""
     package = name.replace("-", "_")
-    cmd = [sys.executable, os.path.join(SCRIPTS_DIR, package, "build.py")]
+    cmd = [sys.executable, "-m", f"scripts.{package}.build"]
     if clean:
         cmd.append("--clean")
     if no_zip:
@@ -48,7 +52,9 @@ def build(name, clean, no_zip):
     print(f"=== {name} ===")
     # check=False on purpose: build-all continues past a failed app and
     # reports all failures at the end instead of stopping at the first.
-    return subprocess.run(cmd, check=False).returncode
+    # cwd=ROOT is what puts scripts/ on the module path, so this works
+    # no matter where the central build was invoked from.
+    return subprocess.run(cmd, check=False, cwd=ROOT).returncode
 
 
 def main(argv=None):
