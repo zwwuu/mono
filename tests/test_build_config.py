@@ -1,9 +1,12 @@
-"""Tests for the default build config: version and app-name reading,
-zip bundling, data copying, and command construction.
+"""Tests for the default build config: zip bundling, data copying,
+and command construction.
 
-Tests use synthetic fixture apps in tmp dirs — never the shipped
-sample apps or shared libraries — so they stay valid whatever apps
-the template holds. The build config under test is loaded as a
+APP_NAME and VERSION are set on the build class by the per-app
+script (imported from the app's meta.py), so these tests set them
+directly — there is no meta.py loading left to test. Tests use
+synthetic fixture apps in tmp dirs — never the shipped sample apps
+or shared libraries — so they stay valid whatever apps the
+template holds. The build config under test is loaded as a
 module, the same way the per-app build scripts load it.
 """
 
@@ -22,27 +25,16 @@ SPEC.loader.exec_module(build_config)
 
 class FixtureBuild(build_config.DefaultBuildConfig):
     APP_NAME = "fake-app"
-    PACKAGE = "fake_app"
-
-
-class FallbackBuild(build_config.DefaultBuildConfig):
-    """A build that takes its app name from the package's meta.py."""
-
-    PACKAGE = "fake_app"
-
-
-class ExplicitBuild(build_config.DefaultBuildConfig):
-    """An explicit APP_NAME wins over the package's meta.py."""
-
-    APP_NAME = "other-app"
+    VERSION = "1.2.3"
     PACKAGE = "fake_app"
 
 
 def make_fixture(tmp_path, version="1.2.3"):
     """A minimal fake app repo: root/src/fake_app/ with data folders.
 
-    meta.py holds the constants; __init__.py is a stub — the build
-    reads meta.py, never __init__.py.
+    The fixture's meta.py is inert here: the build class carries
+    APP_NAME/VERSION directly, as a real per-app script would after
+    importing them from its app's meta.py.
     """
     root = tmp_path / "repo"
     pkg = root / "src" / "fake_app"
@@ -70,76 +62,22 @@ def fixture_builder(tmp_path, cls=FixtureBuild, **overrides):
     return builder
 
 
-def test_read_version_matches_package(tmp_path):
-    assert fixture_builder(tmp_path).read_version() == "1.2.3"
-
-
-def test_read_version_handles_annotated_assignment(tmp_path):
+def test_build_command_uses_explicit_app_name(tmp_path):
     builder = fixture_builder(tmp_path)
-    (Path(builder.package_dir) / "meta.py").write_text(
-        '__version__: str = "9.9.9"\n', encoding="utf-8"
-    )
-    assert builder.read_version() == "9.9.9"
+    cmd = builder.build_command(builder.parse_args([]))
+    assert cmd[cmd.index("--name") + 1] == "fake-app"
 
 
-def test_read_version_missing_raises(tmp_path):
-    builder = fixture_builder(tmp_path)
-    (Path(builder.package_dir) / "meta.py").write_text("__version__: str\n", encoding="utf-8")
-    with pytest.raises(SystemExit):
-        builder.read_version()
+def test_build_command_missing_app_name_raises(tmp_path):
+    builder = fixture_builder(tmp_path, APP_NAME=None)
+    with pytest.raises(SystemExit, match="APP_NAME not set"):
+        builder.build_command(builder.parse_args([]))
 
 
-def make_fallback_fixture(tmp_path, meta_text):
-    """A fake app package at tmp_path/src/fake_app/ for fallback tests.
-
-    FallbackBuild resolves its dirs from build_config.py's location, so
-    these tests point the module at tmp_path to make it read here.
-    meta.py holds the given text; __init__.py is a stub — the build
-    reads meta.py, never __init__.py.
-    """
-    pkg = tmp_path / "src" / "fake_app"
-    pkg.mkdir(parents=True, exist_ok=True)
-    (pkg / "meta.py").write_text(meta_text, encoding="utf-8")
-    (pkg / "__init__.py").write_text('"""Fixture package init."""\n', encoding="utf-8")
-    return pkg
-
-
-def test_app_name_defaults_to_package_meta(tmp_path, monkeypatch):
-    make_fallback_fixture(tmp_path, 'APP_NAME = "fake-app"\n__version__ = "1.2.3"\n')
-    monkeypatch.setattr(build_config, "__file__", str(tmp_path / "scripts" / "build_config.py"))
-    assert FallbackBuild().APP_NAME == "fake-app"
-
-
-def test_app_name_handles_annotated_assignment(tmp_path, monkeypatch):
-    make_fallback_fixture(tmp_path, 'APP_NAME: str = "renamed-app"\n__version__ = "1.2.3"\n')
-    monkeypatch.setattr(build_config, "__file__", str(tmp_path / "scripts" / "build_config.py"))
-    assert FallbackBuild().APP_NAME == "renamed-app"
-
-
-def test_app_name_computed_value_resolves(tmp_path, monkeypatch):
-    # importlib executes the module, so unlike a static parse this
-    # also resolves values that are computed, not literal.
-    make_fallback_fixture(tmp_path, 'APP_NAME = "fake" + "-app"\n__version__ = "1.2.3"\n')
-    monkeypatch.setattr(build_config, "__file__", str(tmp_path / "scripts" / "build_config.py"))
-    assert FallbackBuild().APP_NAME == "fake-app"
-
-
-def test_app_name_missing_raises(tmp_path, monkeypatch):
-    make_fallback_fixture(tmp_path, '__version__ = "1.2.3"\n')
-    monkeypatch.setattr(build_config, "__file__", str(tmp_path / "scripts" / "build_config.py"))
-    with pytest.raises(SystemExit, match="APP_NAME not found"):
-        FallbackBuild()
-
-
-def test_app_name_missing_meta_raises(tmp_path, monkeypatch):
-    monkeypatch.setattr(build_config, "__file__", str(tmp_path / "scripts" / "build_config.py"))
-    with pytest.raises(SystemExit, match="meta.py not found"):
-        FallbackBuild()
-
-
-def test_explicit_app_name_wins_over_package_meta(tmp_path):
-    builder = fixture_builder(tmp_path, cls=ExplicitBuild)
-    assert builder.APP_NAME == "other-app"
+def test_main_missing_version_raises(tmp_path):
+    builder = fixture_builder(tmp_path, VERSION=None)
+    with pytest.raises(SystemExit, match="VERSION not set"):
+        builder.main([])
 
 
 def test_zip_roots_entries_at_folder_name(tmp_path):
@@ -217,10 +155,3 @@ def test_copy_data_files_creates_parent_dirs_for_file_dest(tmp_path):
     out = tmp_path / "fake-app"
     builder.copy_data_files(str(out))
     assert (out / "sub" / "dir" / "extra.txt").read_text(encoding="utf-8") == "extra"
-
-
-def test_meta_module_is_loaded_once(tmp_path):
-    builder = fixture_builder(tmp_path)
-    first, _ = builder._load_meta_module()
-    second, _ = builder._load_meta_module()
-    assert first is second

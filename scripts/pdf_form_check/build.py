@@ -1,19 +1,22 @@
 """Build pdf-form-check.
 
-Only PACKAGE lives here. The app name and version are read from
-src/apps/pdf_form_check/meta.py by DefaultBuildConfig, and the entry
-point is src/apps/pdf_form_check/__main__.py.
+APP_NAME and VERSION are imported from the app's own meta.py — the
+same constants the app itself re-exports — so they are defined
+once. The central build puts src/ on PYTHONPATH for this module;
+a direct run needs PYTHONPATH=src (or an editable install).
 
 Run as a module from the repo root, never as a file:
 `python -m scripts.pdf_form_check.build` (or via scripts/build.py).
-That is what makes the relative import below work — scripts/ is a
-package, so no sys.path manipulation is needed.
 """
+
+from apps.pdf_form_check.meta import APP_NAME, __version__
 
 from ..build_config import DefaultBuildConfig
 
 
 class PdfFormCheckBuild(DefaultBuildConfig):
+    APP_NAME = APP_NAME
+    VERSION = __version__
     PACKAGE = "apps.pdf_form_check"
     CONSOLE = True
 

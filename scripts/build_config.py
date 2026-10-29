@@ -1,15 +1,21 @@
 """Default PyInstaller build config — subclass it per app.
 
 Each app's build script (scripts/<package>/build.py) is a tiny subclass that
-sets PACKAGE and inherits everything else: the
-PyInstaller command line, the zip bundle, and the --clean /
---no-zip / --name / --distpath / --workpath flags. The app name is
-not set in the script: it is read from the package's meta.py
-(the same constants the app itself re-exports from its __init__.py),
-so the name is defined once. Override a class attribute to customize an app:
+sets APP_NAME, VERSION and PACKAGE from the app's own meta.py
+(`from apps.<package>.meta import APP_NAME, __version__`) and inherits
+everything else: the PyInstaller command line, the zip bundle, and
+the --clean / --no-zip / --name / --distpath / --workpath flags.
+The name and version are therefore defined once, in the app package,
+and the build script is just an ordinary import of them — no
+loading meta.py by file path, and no importing it twice under a
+different name. The central build puts src/ on PYTHONPATH for the
+per-app subprocess, so that import works without an install; a
+direct per-app run needs PYTHONPATH=src (or an editable install).
+Override a class attribute to customize an app:
 
-    APP_NAME:       exe name (default: read from the package's meta.py;
-                    set it only to rename the exe)
+    APP_NAME:       exe name (from the app's meta.py; set it only to
+                    rename the exe)
+    VERSION:        app version (from the app's meta.py)
     PACKAGE:        importable package under src/ (required), as a dotted
                     path, e.g. "apps.app_one" -> src/apps/app_one/.
                     A single-component name also works ("fake_app" ->
@@ -36,7 +42,6 @@ internally generated spec is pointed at the build dir with
 
 import argparse
 import datetime
-import importlib.util
 import shutil
 import subprocess
 import sys
@@ -64,52 +69,6 @@ class DefaultBuildConfig:
             self.package_dir = str(Path(self.src_dir).joinpath(*self.PACKAGE.split(".")))
         else:
             self.package_dir = None
-        self._meta_module = None
-        self._meta_path = None
-        # App name defaults to meta.py; an explicit APP_NAME wins.
-        if self.APP_NAME is None:
-            module, _ = self._load_meta_module()
-            app_name = getattr(module, "APP_NAME", None)
-            if app_name is None:
-                raise SystemExit("APP_NAME not found in meta.py")
-            self.APP_NAME = app_name
-
-    # -- meta.py ---------------------------------------------------------
-
-    def _load_meta_module(self):
-        """Load the package's meta.py once (it holds constants only).
-
-        Returns (module, meta_path). Importing — rather than parsing —
-        the file also resolves computed values such as
-        APP_NAME = "fake" + "-app", and annotated assignments such as
-        __version__: str = "9.9.9". A missing file or a value that was
-        only annotated, never assigned, is a build error, not a guess.
-        """
-        if self._meta_module is not None:
-            return self._meta_module, self._meta_path
-        if not self.package_dir:
-            raise SystemExit("meta.py not found: PACKAGE is not set")
-        meta_path = Path(self.package_dir) / "meta.py"
-        if not meta_path.is_file():
-            raise SystemExit(f"meta.py not found: {meta_path}")
-        spec = importlib.util.spec_from_file_location("app_meta", meta_path)
-        if spec is None or spec.loader is None:
-            raise SystemExit(f"meta.py not found: {meta_path}")
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        self._meta_module = module
-        self._meta_path = str(meta_path)
-        return module, self._meta_path
-
-    def read_version(self):
-        """The app version from meta.py (or the explicit VERSION)."""
-        if self.VERSION:
-            return self.VERSION
-        module, _ = self._load_meta_module()
-        version = getattr(module, "__version__", None)
-        if version is None:
-            raise SystemExit("__version__ not found in meta.py")
-        return version
 
     # -- arguments -------------------------------------------------------
 
@@ -139,6 +98,8 @@ class DefaultBuildConfig:
         if args is None:
             args = self.parse_args([])
         name = args.name or self.APP_NAME
+        if not name:
+            raise SystemExit("APP_NAME not set in build script (import it from the app's meta.py)")
         distpath = args.distpath or str(Path(self.root) / "dist")
         workpath = args.workpath or str(Path(self.root) / "build")
         cmd = [
@@ -224,7 +185,9 @@ class DefaultBuildConfig:
         args = self.parse_args(argv)
         if args.name:
             self.APP_NAME = args.name
-        version = self.read_version()
+        version = self.VERSION
+        if not version:
+            raise SystemExit("VERSION not set in build script (import it from the app's meta.py)")
         distpath = Path(args.distpath or Path(self.root) / "dist")
         workpath = Path(args.workpath or Path(self.root) / "build")
         distpath.mkdir(parents=True, exist_ok=True)

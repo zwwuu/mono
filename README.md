@@ -88,9 +88,13 @@ exe when frozen, under `src/apps/<package>/` from source.
    `__main__.py` (absolute import of the app's `main`, e.g.
    `from apps.<package>.main import main`).
 2. Create `scripts/<package>/` with an (empty) `__init__.py` and a
-   `build.py` as a `DefaultBuildConfig` subclass with
+   `build.py` as a `DefaultBuildConfig` subclass that imports
+   `APP_NAME` and `__version__` from the app's `meta.py` and sets
    `PACKAGE = "apps.<package>"` (add `EXTRA_DATAS` for files
-   outside `config/` and `assets/`).
+   outside `config/` and `assets/`). The central build puts
+   `src/` on PYTHONPATH for the per-app subprocess, so that import
+   works without an install; a direct per-app run needs
+   `PYTHONPATH=src` (or an editable install).
 3. Add its console script to `pyproject.toml` and its tests under
    `tests/<package>/`. Nothing else needs editing: the central
    build discovers apps by scanning `scripts/*/build.py`.
@@ -100,9 +104,9 @@ exe when frozen, under `src/apps/<package>/` from source.
 The root `pyproject.toml` version (0.1.0) is the distribution
 version and is decorative here — nothing is published to PyPI.
 The version that matters per app is its own `meta.py`
-`__version__`: the app prints it (`--version`), and the build
-reads it for the zip name. A per-app build script should not
-re-declare it; `DefaultBuildConfig` reads it from `meta.py`.
+`__version__`: the app prints it (`--version`), and the per-app
+build script imports it for the zip name. It is never re-declared
+as a literal in the build script — only imported.
 
 ## Why not uv workspaces / Pants / Bazel?
 

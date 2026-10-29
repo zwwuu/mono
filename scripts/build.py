@@ -53,8 +53,17 @@ def build(name, clean, no_zip):
     # check=False on purpose: build-all continues past a failed app and
     # reports all failures at the end instead of stopping at the first.
     # cwd=ROOT is what puts scripts/ on the module path, so this works
-    # no matter where the central build was invoked from.
-    return subprocess.run(cmd, check=False, cwd=ROOT).returncode
+    # no matter where the central build was invoked from. PYTHONPATH
+    # is what puts src/ there, so the per-app module can import its
+    # app's meta.py as apps.<package>.meta — setting it here, in the
+    # runner, instead of having each build script manipulate sys.path.
+    env = dict(os.environ)
+    src_dir = os.path.join(ROOT, "src")
+    if env.get("PYTHONPATH"):
+        env["PYTHONPATH"] = src_dir + os.pathsep + env["PYTHONPATH"]
+    else:
+        env["PYTHONPATH"] = src_dir
+    return subprocess.run(cmd, check=False, cwd=ROOT, env=env).returncode
 
 
 def main(argv=None):

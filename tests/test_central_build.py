@@ -30,16 +30,19 @@ def test_discover_apps_lists_only_package_dirs_with_build_py(tmp_path, monkeypat
 def test_build_forwards_flags_to_app_script(tmp_path, monkeypatch):
     seen = []
 
-    def fake_run(cmd, check=False, cwd=None):
-        seen.append((cmd, cwd))
+    def fake_run(cmd, check=False, cwd=None, env=None):
+        seen.append((cmd, cwd, env))
         return SimpleNamespace(returncode=0)
 
     monkeypatch.setattr(build_module.subprocess, "run", fake_run)
     monkeypatch.setattr(build_module, "SCRIPTS_DIR", str(tmp_path))
     assert build_module.build("beta-app", clean=True, no_zip=True) == 0
-    cmd, cwd = seen[0]
+    cmd, cwd, env = seen[0]
     assert cmd == [sys.executable, "-m", "scripts.beta_app.build", "--clean", "--no-zip"]
     assert cwd == build_module.ROOT
+    # src/ on PYTHONPATH is what lets the per-app module import its
+    # app's meta.py.
+    assert env["PYTHONPATH"].split(":")[0] == str(Path(build_module.ROOT) / "src")
 
 
 def test_build_returns_nonzero_without_stopping(monkeypatch):
