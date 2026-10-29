@@ -2,9 +2,9 @@
 
 import pytest
 
-from pdf_form_check.checker import FormChecker
-from pdf_form_check.errors import FieldsMissingError, InputError, MalformedPdfError
-from pdf_form_check.form_reader import PdfFormReader
+from apps.pdf_form_check.checker import FormChecker
+from apps.pdf_form_check.errors import FieldsMissingError, InputError, MalformedPdfError
+from apps.pdf_form_check.form_reader import PdfFormReader
 from tests.pdf_form_check.pdf_factory import (
     make_checkbox_pdf,
     make_encrypted_pdf,

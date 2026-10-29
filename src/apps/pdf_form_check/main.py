@@ -1,4 +1,4 @@
-"""Run as `python -m pdf_form_check`."""
+"""Run as `python -m apps.pdf_form_check` (via __main__.py)."""
 
 from .cli import main
 

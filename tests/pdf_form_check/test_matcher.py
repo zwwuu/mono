@@ -2,7 +2,7 @@
 
 import pytest
 
-from pdf_form_check.matcher import YesMatcher
+from apps.pdf_form_check.matcher import YesMatcher
 
 MATCHER = YesMatcher()
 

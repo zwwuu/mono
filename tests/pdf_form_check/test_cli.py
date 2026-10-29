@@ -1,17 +1,30 @@
 """CLI tests: real subprocess runs, asserting exit codes and output."""
 
+import os
 import subprocess
 import sys
+from pathlib import Path
 
 from tests.pdf_form_check.pdf_factory import make_form_pdf
 
+ROOT = Path(__file__).resolve().parents[2]
+
 
 def run_cli(*args):
+    # The subprocess does not inherit pytest's pythonpath, so put
+    # src/ (for apps.*) on PYTHONPATH explicitly. This also works
+    # without an editable install; with one, it is harmless.
+    env = dict(os.environ)
+    pythonpath = str(ROOT / "src")
+    if env.get("PYTHONPATH"):
+        pythonpath += os.pathsep + env["PYTHONPATH"]
+    env["PYTHONPATH"] = pythonpath
     return subprocess.run(
-        [sys.executable, "-m", "pdf_form_check", *args],
+        [sys.executable, "-m", "apps.pdf_form_check", *args],
         capture_output=True,
         text=True,
         check=False,
+        env=env,
     )
 
 

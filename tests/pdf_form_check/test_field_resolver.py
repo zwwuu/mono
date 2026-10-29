@@ -1,6 +1,6 @@
 """Tests for FieldResolver's precedence: exact, dotted, case-insensitive."""
 
-from pdf_form_check.field_resolver import FieldResolver
+from apps.pdf_form_check.field_resolver import FieldResolver
 
 
 def test_exact_match_wins():

@@ -4,7 +4,7 @@ Config precedence (first file found wins, merged over `defaults`):
     1. any directory in `search_dirs` (tests, --config-dir),
     2. when frozen: <folder>/ next to the exe (the deployed copy,
        editable in place),
-    3. from source: src/<package>/<folder>/<filename>, or the
+    3. from source: src/apps/<package>/<folder>/<filename>, or the
        installed package dir when there is no source checkout.
 
 Merging is recursive for nested dicts (lists and scalars replace).
@@ -87,7 +87,7 @@ def app_file_path(app_name, *parts):
     the first part. Use it for template files and folders with
     arbitrary names, e.g.
     app_file_path("app-two", "templates", "monthly-summary.xlsx").
-    Frozen: <parts> next to the exe; from source: src/<package>/<parts>.
+    Frozen: <parts> next to the exe; from source: src/apps/<package>/<parts>.
     """
     candidates = []
     if is_frozen():

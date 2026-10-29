@@ -41,6 +41,10 @@ def build(name, clean, no_zip):
     """Run one app's build script; return its exit code."""
     package = name.replace("-", "_")
     cmd = [sys.executable, os.path.join(SCRIPTS_DIR, package, "build.py")]
+    if clean:
+        cmd.append("--clean")
+    if no_zip:
+        cmd.append("--no-zip")
     print(f"=== {name} ===")
     # check=False on purpose: build-all continues past a failed app and
     # reports all failures at the end instead of stopping at the first.
@@ -57,6 +61,8 @@ def main(argv=None):
         choices=["all", *apps],
         help="app to build (default: all)",
     )
+    parser.add_argument("--clean", action="store_true", help="clean before building")
+    parser.add_argument("--no-zip", action="store_true", help="skip the zip bundle")
     args = parser.parse_args(argv)
 
     names = apps if args.app == "all" else [args.app]

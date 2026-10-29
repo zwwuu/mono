@@ -26,7 +26,7 @@ def exe_dir():
 
 
 def repo_app_dir(app_name):
-    """The app's package dir inside a source checkout: src/<package>/.
+    """The app's package dir inside a source checkout: src/apps/<package>/.
 
     Only meaningful from source: this file lives at
     src/common/utils/paths.py, so parents[3] is the repo root, and the
@@ -34,19 +34,20 @@ def repo_app_dir(app_name):
     whether or not it exists; callers check existence.
     """
     package = app_name.replace("-", "_")
-    return str(Path(__file__).resolve().parents[3] / "src" / package)
+    return str(Path(__file__).resolve().parents[3] / "src" / "apps" / package)
 
 
 def installed_package_dir(app_name):
     """The app's package dir in an installed (wheel) layout, or None.
 
     Resolves through sys.path, so in a source checkout it points at
-    src/<package>/ (the same dir repo_app_dir() returns), and in a
-    wheel install at site-packages/<package>/. Returns None when the
-    package is not importable.
+    src/apps/<package>/ (the same dir repo_app_dir() returns), and in
+    a wheel install at site-packages/apps/<package>/. Returns None
+    when the package is not importable.
     """
     package = app_name.replace("-", "_")
-    spec = importlib.util.find_spec(package)
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    return str(Path(spec.submodule_search_locations[0]))
+    for module_name in (f"apps.{package}", package):
+        spec = importlib.util.find_spec(module_name)
+        if spec is not None and spec.submodule_search_locations:
+            return str(Path(spec.submodule_search_locations[0]))
+    return None

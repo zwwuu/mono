@@ -1,16 +1,19 @@
 """app-one entry point: report sender.
 
-Absolute imports only — PyInstaller runs this file as a plain script,
-where relative imports fail. `python -m app_one` works the same way.
+Relative imports to the app's own package, absolute imports to
+common/. The PyInstaller entry is __main__.py, which imports this
+module as apps.app_one.main, so the relative imports resolve both
+from source (`python -m apps.app_one`) and in the exe.
 """
 
 import argparse
 
-from . import APP_NAME, __version__
-from .report import build_report
 from common.logging import get_logger, setup_logging
 from common.mail import MailClient, MailConfig
 from common.utils import app_file_path, load_app_config, read_app_asset
+
+from . import APP_NAME, __version__
+from .report import build_report
 
 DEFAULT_CONFIG = {
     "subject": "Daily report",
