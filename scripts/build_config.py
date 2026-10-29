@@ -15,7 +15,6 @@ so the name is defined once. Override a class attribute to customize an app:
                     A single-component name also works ("fake_app" ->
                     src/fake_app/), which is what the build tests use.
     CONSOLE:        True = console app, False = windowed GUI (default True)
-    HIDDEN_IMPORTS: modules PyInstaller can't see, e.g. dynamic imports
     EXTRA_DATAS:    extra files/folders to bundle — the way to include
                     template .docx/.xlsx files or template folders with
                     arbitrary names, e.g. ("src/apps/app_two/templates",
@@ -24,7 +23,6 @@ so the name is defined once. Override a class attribute to customize an app:
                     recursively. A pair means "this source ends up at
                     dest, flat next to the exe". Locate them at runtime
                     with common.utils.app_file_path().
-    ICON:           path to a .ico file, relative to the repo root (or None)
 
 Data placement: PyInstaller forces --add-data into _internal, so
 the build never uses it. After PyInstaller runs, the data folders
@@ -53,10 +51,7 @@ class DefaultBuildConfig:
     VERSION = None
     PACKAGE = None
     CONSOLE = True
-    HIDDEN_IMPORTS = ()
     EXTRA_DATAS = ()
-    DATA_FOLDERS = ("config", "assets")
-    ICON = None
 
     def __init__(self):
         # Root is derived from this file's location (scripts/build_config.py),
@@ -162,10 +157,6 @@ class DefaultBuildConfig:
         cmd.extend(["--specpath", workpath])
         if args.clean:
             cmd.append("--clean")
-        for hidden in self.HIDDEN_IMPORTS:
-            cmd.extend(["--hidden-import", hidden])
-        if self.ICON:
-            cmd.extend(["--icon", str(Path(self.root) / self.ICON)])
         # Never --add-data: data is copied flat next to the exe after
         # PyInstaller runs (see copy_data_files), because --add-data
         # would bury it in _internal instead.
@@ -184,7 +175,9 @@ class DefaultBuildConfig:
         """
         out = Path(out_dir)
         out.mkdir(parents=True, exist_ok=True)
-        for folder in self.DATA_FOLDERS:
+        # The app's data folders, copied as-is. Not a knob: every app
+        # keeps its config in config/ and its templates in assets/.
+        for folder in ("config", "assets"):
             src_folder = Path(self.package_dir) / folder
             if not src_folder.is_dir():
                 continue

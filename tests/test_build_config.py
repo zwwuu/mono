@@ -8,6 +8,7 @@ module, the same way the per-app build scripts load it.
 """
 
 import importlib.util
+import shutil
 import zipfile
 from pathlib import Path
 
@@ -181,16 +182,15 @@ def test_copy_data_files_missing_source_fails(tmp_path):
         builder.copy_data_files(str(tmp_path / "fake-app"))
 
 
-def test_copy_data_files_respects_data_folders_override(tmp_path):
-    builder = fixture_builder(tmp_path, DATA_FOLDERS=("config",))
+def test_copy_data_files_skips_missing_folder(tmp_path):
+    builder = fixture_builder(tmp_path)
+    # An app without an assets/ folder: copying must not fail, and
+    # must not create an empty assets/ in the output.
+    shutil.rmtree(Path(builder.package_dir) / "assets")
     out = tmp_path / "fake-app"
     builder.copy_data_files(str(out))
     assert (out / "config" / "config.json").is_file()
     assert not (out / "assets").exists()
-
-    builder = fixture_builder(tmp_path, DATA_FOLDERS=("no-such-folder",))
-    # A missing folder is skipped silently, not an error.
-    builder.copy_data_files(str(tmp_path / "empty"))
 
 
 def test_build_command_uses_onedir_and_no_add_data(tmp_path):
@@ -203,11 +203,10 @@ def test_build_command_uses_onedir_and_no_add_data(tmp_path):
 
 
 def test_subclass_override_changes_command(tmp_path):
-    builder = fixture_builder(tmp_path, CONSOLE=False, HIDDEN_IMPORTS=("some_plugin",))
+    builder = fixture_builder(tmp_path, CONSOLE=False)
     cmd = builder.build_command(builder.parse_args([]))
     assert "--windowed" in cmd
-    assert "--hidden-import" in cmd
-    assert "some_plugin" in cmd
+    assert "--console" not in cmd
 
 
 def test_copy_data_files_creates_parent_dirs_for_file_dest(tmp_path):
