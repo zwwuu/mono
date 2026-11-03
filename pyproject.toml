@@ -9,7 +9,7 @@ description = "Python monorepo template: several apps sharing common libraries, 
 readme = "README.md"
 requires-python = ">=3.10"
 # becomes available to all apps (see README).
-dependencies = ["pypdf>=4"]
+dependencies = ["pypdf>=4",  "pyinstaller>=6"]
 
 # One console command per app: `app-one` etc. after install.
 # The packages live under src/apps/, so the entry points are the
@@ -25,7 +25,6 @@ pdf-form-check = "apps.pdf_form_check.cli:main"
 dev = [
     "pytest>=8",
     "ruff>=0.6",
-    "pyinstaller>=6",
     "reportlab>=4",
 ]
 

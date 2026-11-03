@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FileFlow — Task Dashboard</title>
+<link rel="stylesheet" href="/static/bootstrap.min.css">
+<style>
+  /* App-specific bits Bootstrap doesn't cover: run-status colors,
+     the monospace log, and the two-pane full-height layout. */
+  .app-main { height: calc(100vh - 49px); }
+  .app-pane { overflow-y: auto; }
+  .RUNNING { background: #1f6feb; color: #fff; } .PENDING { background: #6e7681; color: #fff; }
+  .AWAITING_APPROVAL { background: #9e6a03; color: #fff; } .STUCK { background: #b62324; color: #fff; }
+  .COMPLETED { background: #238636; color: #fff; } .FAILED { background: #6e7681; color: #fff; }
+  #log { font-family: ui-monospace, monospace; font-size: 12.5px; white-space: pre-wrap;
+         line-height: 1.5; }
+</style>
+</head>
+<body>
+<header class="d-flex gap-2 align-items-center px-3 py-2 border-bottom">
+  <h1 class="h5 mb-0">FileFlow</h1>
+  <select id="taskSel" class="form-select form-select-sm w-auto"></select>
+  <button class="btn btn-primary btn-sm" onclick="runTask()">▶ Run task</button>
+  <span class="text-secondary small" id="conn">connecting…</span>
+</header>
+<main class="container-fluid app-main">
+  <div class="row h-100">
+  <section class="col-lg-6 app-pane py-3">
+    <h3>Tasks</h3>
+    <table class="table table-striped table-hover table-sm align-middle">
+      <thead><tr><th>ID</th><th>Name</th><th>Steps</th><th>Destinations</th><th>State</th><th></th></tr></thead>
+      <tbody id="taskBody"></tbody>
+    </table>
+    <div class="my-3">
+      <textarea id="taskJson" rows="8" class="form-control font-monospace">{
+  "id": "my-task",
+  "name": "My Task",
+  "enabled": true,
+  "source": {"type": "website", "url": "https://example.com/report.csv"},
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {"type": "local", "dir": "reports"},
+    {"type": "smb", "dir": "reports"}
+  ],
+  "notify": false
+}</textarea>
+      <div class="d-flex gap-2 mt-2 align-items-center">
+        <button class="btn btn-primary btn-sm" onclick="addTask()">＋ Add task</button>
+        <span class="text-secondary small">Tasks live in tasks.json — add, edit or delete here, or edit the file directly (the server reloads it). Destinations: ftp / local / smb, each with its own dir. Rename uses {date}, {name}, {ext}, {task}, {checksum8} and more.</span>
+      </div>
+      <div id="taskError" class="text-danger mt-2"></div>
+    </div>
+    <h3>Runs</h3>
+    <table class="table table-striped table-hover table-sm align-middle">
+      <thead><tr><th>ID</th><th>Task</th><th>Name</th><th>Status</th><th>Step</th><th>Updated</th><th></th></tr></thead>
+      <tbody id="runBody"></tbody>
+    </table>
+    <div id="detail"></div>
+    <h3>Schedules</h3>
+    <div class="d-flex gap-2 flex-wrap align-items-center mb-3">
+      <input id="schName" class="form-control form-control-sm w-auto" placeholder="Schedule name" value="daily-report">
+      <select id="schTask" class="form-select form-select-sm w-auto"><option value="">(choose a task)</option></select>
+      <select id="schFreq" class="form-select form-select-sm w-auto" onchange="schFreqChanged()">
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
+      <input id="schTime" class="form-control form-control-sm w-auto" type="time" value="07:30">
+      <select id="schWeekday" class="form-select form-select-sm w-auto" style="display:none">
+        <option value="0">Monday</option><option value="1">Tuesday</option>
+        <option value="2">Wednesday</option><option value="3">Thursday</option>
+        <option value="4">Friday</option><option value="5">Saturday</option>
+        <option value="6">Sunday</option>
+      </select>
+      <input id="schDom" class="form-control form-control-sm" type="number" min="1" max="31" value="1" style="display:none; width:70px" title="Day of month">
+      <button class="btn btn-primary btn-sm" onclick="createSchedule()">＋ Add schedule</button>
+    </div>
+    <table class="table table-striped table-hover table-sm align-middle">
+      <thead><tr><th>Name</th><th>Schedule</th><th>Next run</th><th>Last run</th><th>State</th><th></th></tr></thead>
+      <tbody id="schBody"></tbody>
+    </table>
+    <p class="text-secondary small">Times are local server time. A schedule missed while the server was down fires once on startup. A schedule won't start a new run while its previous run is still active.</p>
+  </section>
+  <section class="col-lg-6 app-pane py-3 border-start">
+    <h3>Live log <span class="text-secondary small" id="logTitle"></span></h3>
+    <div id="log"></div>
+  </section>
+  </div>
+</main>
+<script>
+let selected = null, es = null;
+let activeTaskIds = new Set();
+const ACTIVE = ['PENDING', 'RUNNING', 'AWAITING_APPROVAL', 'STUCK'];
+
+async function api(path, method, body) {
+  const r = await fetch(path, { method: method || 'GET',
+    headers: { 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined });
+  return r.json();
+}
+
+async function runWithOverride(path) {
+  // First try: a normal start. If the task hit its run limit, ask the
+  // user whether to override it (already-running refusals are not
+  // overridable, so they never reach the confirm).
+  let r = await api(path, 'POST', {});
+  if (r.error && r.limit_exceeded) {
+    if (confirm(r.error + '\n\nRun anyway (override the limit)?')) {
+      r = await api(path, 'POST', {override_limit: true});
+    }
+  }
+  return r;
+}
+
+async function runTask() {
+  const id = document.getElementById('taskSel').value;
+  if (!id) return;
+  if (activeTaskIds.has(id)) { alert(`Task ${id} already has an active run.`); return; }
+  const r = await runWithOverride(`/api/tasks/${id}/run`);
+  if (r.error) { alert(r.error); return; }
+  selected = r.run_id;
+  refresh(); watchLog(r.run_id);
+}
+
+async function act(id, action) { await api(`/api/runs/${id}/${action}`, 'POST', {}); refresh(); }
+
+async function taskAct(id, action) {
+  let r;
+  if (action === 'run') {
+    r = await runWithOverride(`/api/tasks/${id}/run`);
+  } else {
+    r = await api(`/api/tasks/${id}/${action}`, 'POST', {});
+  }
+  if (r.error) alert(r.error);
+  if (r.run_id) { selected = r.run_id; watchLog(r.run_id); }
+  refreshTasks(); refresh();
+}
+
+async function taskDelete(id) {
+  if (!confirm('Delete task ' + id + '? Past runs are kept as history.')) return;
+  await api(`/api/tasks/${id}`, 'DELETE');
+  refreshTasks();
+}
+
+async function addTask() {
+  const el = document.getElementById('taskError');
+  el.textContent = '';
+  let body;
+  try { body = JSON.parse(document.getElementById('taskJson').value); }
+  catch (e) { el.textContent = 'Invalid JSON: ' + e.message; return; }
+  const r = await api('/api/tasks', 'POST', body);
+  if (r.error) { el.textContent = r.error; return; }
+  refreshTasks();
+}
+
+function taskSummary(t) {
+  if (t.steps) return t.steps.map(s => s.type === 'copy' ? `copy→${s.to.type}:${s.to.dir}` : s.type).join(', ');
+  const dests = (t.destinations || []).map(d => `${d.type}:${d.dir}`).join(', ');
+  return dests || '(default pipeline)';
+}
+
+async function refreshTasks() {
+  const list = await api('/api/tasks');
+  const tb = document.getElementById('taskBody');
+  tb.innerHTML = '';
+  const sel = document.getElementById('taskSel');
+  const schSel = document.getElementById('schTask');
+  const prev = sel.value, prevSch = schSel.value;
+  sel.innerHTML = ''; schSel.innerHTML = '<option value="">(choose a task)</option>';
+  for (const t of list) {
+    const tr = document.createElement('tr');
+    const state = t.enabled !== false ? '<span class="text-success">enabled</span>' : '<span class="text-secondary">disabled</span>';
+    const stepCount = t.steps ? t.steps.length : 'shorthand';
+    const lim = t.limit_usage
+      ? `<div class="text-secondary small">limit ${t.limit_usage.used}/${t.limit_usage.max} per ${t.limit_usage.period}</div>`
+      : '';
+    tr.innerHTML = `<td>${t.id}</td><td>${t.name}${lim}</td><td>${stepCount}</td>
+      <td class="text-secondary">${taskSummary(t)}</td><td>${state}</td>
+      <td class="text-nowrap"><button class="btn btn-primary btn-sm" data-run-btn="${t.id}" ${activeTaskIds.has(t.id) ? 'disabled title="Already running"' : ''} onclick="taskAct('${t.id}','run')">Run</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="taskAct('${t.id}','${t.enabled !== false ? 'disable' : 'enable'}')">${t.enabled !== false ? 'Disable' : 'Enable'}</button>
+          <button class="btn btn-outline-danger btn-sm" onclick="taskDelete('${t.id}')">Delete</button></td>`;
+    tb.appendChild(tr);
+    const o = document.createElement('option'); o.value = t.id; o.textContent = t.id + ' — ' + t.name;
+    sel.appendChild(o);
+    const o2 = document.createElement('option'); o2.value = t.id; o2.textContent = t.id;
+    schSel.appendChild(o2);
+  }
+  if (prev) sel.value = prev;
+  if (prevSch) schSel.value = prevSch;
+}
+
+function badge(s) { return `<span class="badge ${s}">${s}</span>`; }
+
+async function refresh() {
+  const list = await api('/api/runs');
+  activeTaskIds = new Set(list.filter(r => ACTIVE.includes(r.status)).map(r => r.task_id));
+  document.querySelectorAll('[data-run-btn]').forEach(b => {
+    b.disabled = activeTaskIds.has(b.dataset.runBtn);
+    if (b.disabled) b.title = 'Already running';
+  });
+  const tb = document.getElementById('runBody');
+  tb.innerHTML = '';
+  for (const run of list) {
+    const tr = document.createElement('tr');
+    if (run.id === selected) tr.className = 'table-active';
+    let actions = '';
+    if (run.status === 'AWAITING_APPROVAL')
+      actions = `<button class="btn btn-primary btn-sm" onclick="act(${run.id},'approve')">Approve</button>
+                 <button class="btn btn-danger btn-sm" onclick="act(${run.id},'reject')">Reject</button>`;
+    if (run.status === 'STUCK')
+      actions = `<button class="btn btn-warning btn-sm" onclick="act(${run.id},'retry')">Retry step</button>
+                 <button class="btn btn-danger btn-sm" onclick="act(${run.id},'fail')">Abandon</button>`;
+    tr.innerHTML = `<td>${run.id}</td><td class="text-secondary">${run.task_id || ''}</td><td>${run.name}</td><td>${badge(run.status)}</td>
+      <td>${run.current_step || ''}</td><td class="text-secondary">${run.updated_at}</td><td class="text-nowrap">${actions}</td>`;
+    tr.onclick = () => { selected = run.id; watchLog(run.id); refresh(); showDetail(run.id); };
+    tb.appendChild(tr);
+  }
+  if (selected) showDetail(selected);
+}
+
+async function showDetail(id) {
+  const run = await api(`/api/runs/${id}`);
+  const d = document.getElementById('detail');
+  const items = (run.steps || []).map(s => {
+    const cls = s.status === 'SUCCESS' ? 'text-success' : (s.status === 'STUCK' ? 'text-danger' : 'text-primary');
+    return `<li class="${cls}">${s.step_key} — ${s.status}${s.message ? ' · ' + s.message : ''}</li>`;
+  }).join('');
+  const ctx = Object.entries(run.context || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+  d.innerHTML = `<h4>Run #${run.id} — task ${run.task_id || ''} — ${run.status}</h4>
+    ${run.error ? `<p class="text-danger">${run.error}</p>` : ''}
+    <ol class="small">${items}</ol>
+    <pre class="text-secondary">${ctx}</pre>`;
+}
+
+function schFreqChanged() {
+  const f = document.getElementById('schFreq').value;
+  document.getElementById('schWeekday').style.display = f === 'weekly' ? '' : 'none';
+  document.getElementById('schDom').style.display = f === 'monthly' ? '' : 'none';
+}
+
+async function createSchedule() {
+  const f = document.getElementById('schFreq').value;
+  const body = { name: document.getElementById('schName').value || 'file-task',
+                 frequency: f, time: document.getElementById('schTime').value || '07:30' };
+  const taskId = document.getElementById('schTask').value;
+  if (!taskId) { alert('Pick a task for the schedule.'); return; }
+  body.task_id = taskId;
+  if (f === 'weekly') body.weekday = parseInt(document.getElementById('schWeekday').value, 10);
+  if (f === 'monthly') body.day_of_month = parseInt(document.getElementById('schDom').value, 10);
+  const r = await api('/api/schedules', 'POST', body);
+  if (r.error) alert('Could not create schedule: ' + r.error);
+  refreshSchedules();
+}
+
+async function schAct(id, action) {
+  let r;
+  if (action === 'run') {
+    r = await runWithOverride(`/api/schedules/${id}/run`);
+  } else {
+    r = await api(`/api/schedules/${id}/${action}`, 'POST', {});
+  }
+  if (r.error) alert(r.error);
+  if (r.run_id) { selected = r.run_id; watchLog(r.run_id); }
+  refreshSchedules(); refresh();
+}
+
+async function schDelete(id) {
+  if (!confirm('Delete this schedule?')) return;
+  await api(`/api/schedules/${id}`, 'DELETE');
+  refreshSchedules();
+}
+
+async function refreshSchedules() {
+  const list = await api('/api/schedules');
+  const tb = document.getElementById('schBody');
+  tb.innerHTML = '';
+  for (const s of list) {
+    const tr = document.createElement('tr');
+    const state = s.enabled ? '<span class="text-success">enabled</span>' : '<span class="text-secondary">disabled</span>';
+    tr.innerHTML = `<td>${s.name}${s.task_id ? `<div class="text-secondary small">task ${s.task_id}</div>` : ''}</td><td>${s.description}</td>
+      <td class="text-secondary">${s.enabled ? (s.next_run_at || '') : '—'}</td>
+      <td class="text-secondary">${s.last_run_at || 'never'}</td><td>${state}</td>
+      <td class="text-nowrap"><button class="btn btn-primary btn-sm" onclick="schAct(${s.id},'run')">Run now</button>
+          <button class="btn btn-outline-secondary btn-sm" onclick="schAct(${s.id},'${s.enabled ? 'disable' : 'enable'}')">${s.enabled ? 'Disable' : 'Enable'}</button>
+          <button class="btn btn-outline-danger btn-sm" onclick="schDelete(${s.id})">Delete</button></td>`;
+    tb.appendChild(tr);
+  }
+}
+
+function watchLog(id) {  document.getElementById('logTitle').textContent = '— run #' + id;
+  document.getElementById('log').innerHTML = '';
+  if (es) es.close();
+  es = new EventSource(`/api/logs/stream?run_id=${id}`);
+  es.onopen = () => document.getElementById('conn').textContent = 'live';
+  es.onmessage = (e) => {
+    const entry = JSON.parse(e.data);
+    const div = document.createElement('div');
+    div.className = entry.level === 'ERROR' ? 'text-danger' : (entry.level === 'WARN' ? 'text-warning' : '');
+    div.textContent = `[${entry.level}] ${entry.message}`;
+    const log = document.getElementById('log');
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    refresh();
+  };
+  es.onerror = () => document.getElementById('conn').textContent = 'reconnecting…';
+}
+
+refresh();
+refreshTasks();
+refreshSchedules();
+setInterval(() => { refresh(); refreshTasks(); refreshSchedules(); }, 3000);
+</script>
+</body>
+</html>

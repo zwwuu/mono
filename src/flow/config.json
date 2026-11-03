@@ -1,0 +1,52 @@
+{
+  "app": {
+    "data_dir": "./data",
+    "host": "127.0.0.1",
+    "port": 8080,
+    "log_level": "INFO",
+    "log_retention_days": 30
+  },
+  "demo": {
+    "enabled": true,
+    "process_delay_seconds": 8,
+    "source_file": "input_report.csv"
+  },
+  "ftp": {
+    "host": "",
+    "port": 21,
+    "username": "",
+    "timeout_seconds": 30,
+    "poll_seconds": 5
+  },
+  "notify": {
+    "on_stuck": true,
+    "recipients": [
+      "operator@example.com"
+    ]
+  },
+  "scheduler": {
+    "allow_overlap": false,
+    "tick_seconds": 20
+  },
+  "smb": {
+    "mode": "path",
+    "path": "",
+    "server": "",
+    "share": "",
+    "target_dir": "",
+    "username": ""
+  },
+  "smtp": {
+    "from": "fileflow@localhost",
+    "host": "",
+    "port": 587,
+    "security": "starttls",
+    "username": ""
+  },
+  "source": {
+    "timeout_seconds": 60
+  },
+  "steps": {
+    "timeout_seconds": 300
+  }
+}

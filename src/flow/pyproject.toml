@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools >= 84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fileflow"
+dynamic = ["version"]
+description = "File-processing workflow runner with human approval, scheduling, and a live dashboard"
+readme = "README.md"
+requires-python = ">=3.15"
+# Runtime dependencies: loguru for logging (console + date-rotated
+# files), SQLAlchemy for persistence (SQLite), Playwright for "browser"
+# sources (login, click, download), Pydantic for task validation, and
+# FastAPI + uvicorn for the dashboard server (same API paths and JSON
+# shapes as before; SSE log stream via StreamingResponse).
+# The Chromium binary itself is installed separately:
+# `playwright install chromium`. Paramiko and requests are declared for
+# later use (planned SFTP mode and HTTP work). pytest-playwright is
+# test-only: runtime steps drive the browser through playwright's own
+# API, not through pytest fixtures. Added libraries are not removed on
+# unused-grounds alone.
+dependencies = [
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.162.0",
+    "loguru>=0.7.3",
+    "paramiko>=5.1.0",
+    "playwright>=1.40",
+    "pydantic>=2.14.1",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.1.6",
+    "uvicorn>=0.54.0",
+]
+
+[project.optional-dependencies]
+# Only needed for smb mode = "smbprotocol".
+smb = ["smbprotocol>=1.10"]
+# Test-only: never runtime dependencies.
+dev = ["pytest>=9.1.1", "pytest-playwright>=0.10.0"]
+
+[project.scripts]
+fileflow = "fileflow.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "fileflow.__version__"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"fileflow.web" = ["static/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

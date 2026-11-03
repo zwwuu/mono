@@ -1,0 +1,9 @@
+.DS_Store
+node_modules/
+package-lock.json
+.prettierrc
+.vscode/
+assets/css/main.css
+assets/css/main.css.map
+assets/css/editor.css
+assets/css/editor.css.map

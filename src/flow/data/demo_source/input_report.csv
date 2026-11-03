@@ -1,0 +1,4 @@
+id,customer,amount,status
+1,Acme Corp,1200.50,pending
+2,Globex,349.99,pending
+3,Initech,8999.00,pending

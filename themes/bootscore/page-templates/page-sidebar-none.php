@@ -1,0 +1,51 @@
+<?php
+
+/**
+ * Template Name: No Sidebar
+ * Template Version: 6.3.1
+ *
+ * @link https://developer.wordpress.org/themes/basics/template-hierarchy/
+ *
+ * @package Bootscore
+ */
+
+// Exit if accessed directly
+defined('ABSPATH') || exit;
+
+get_header();
+?>
+
+  <div id="content" class="site-content <?= esc_attr(apply_filters('bootscore/class/container', 'container', 'page-sidebar-none')); ?> <?= esc_attr(apply_filters('bootscore/class/content/spacer', 'pt-4 pb-5', 'page-sidebar-none')); ?>">
+    <div id="primary" class="content-area">
+      
+      <?php do_action( 'bootscore_after_primary_open', 'page-sidebar-none' ); ?>
+
+      <main id="main" class="site-main">
+
+        <div class="entry-header">
+          <?php the_post(); ?>
+          <?php do_action( 'bootscore_before_title', 'page-sidebar-none' ); ?>
+          <?php the_title('<h1 class="entry-title ' . esc_attr(apply_filters('bootscore/class/entry/title', '', 'page-sidebar-none')) . '">', '</h1>'); ?>
+          <?php do_action( 'bootscore_after_title', 'page-sidebar-none' ); ?>
+          <?php bootscore_post_thumbnail(); ?>
+        </div>
+        
+        <?php do_action( 'bootscore_after_featured_image', 'page-sidebar-none' ); ?>
+
+        <div class="entry-content">
+          <?php the_content(); ?>
+        </div>
+        
+        <?php do_action( 'bootscore_before_entry_footer', 'page-sidebar-none' ); ?>
+
+        <div class="entry-footer">
+          <?php comments_template(); ?>
+        </div>
+
+      </main>
+
+    </div>
+  </div>
+
+<?php
+get_footer();
