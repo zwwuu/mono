@@ -10,7 +10,6 @@ Run as a module from the repo root, never as a file:
 """
 
 from apps.pdf_form_check.meta import APP_NAME, __version__
-
 from common.build_config.build_config import DefaultBuildConfig
 
 

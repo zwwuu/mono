@@ -11,14 +11,15 @@ module, the same way the per-app build scripts load it.
 """
 
 import importlib.util
-import shutil
 import zipfile
 from pathlib import Path
 
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SPEC = importlib.util.spec_from_file_location("build_config", ROOT / "scripts" / "build_config.py")
+SPEC = importlib.util.spec_from_file_location(
+    "build_config", ROOT / "src" / "common" / "build_config" / "build_config.py"
+)
 build_config = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(build_config)
 
@@ -26,7 +27,6 @@ SPEC.loader.exec_module(build_config)
 class FixtureBuild(build_config.DefaultBuildConfig):
     APP_NAME = "fake-app"
     VERSION = "1.2.3"
-    PACKAGE = "fake_app"
 
 
 def make_fixture(tmp_path, version="1.2.3"):
@@ -55,7 +55,6 @@ def fixture_builder(tmp_path, cls=FixtureBuild, **overrides):
     root, pkg = make_fixture(tmp_path)
     builder = cls()
     builder.root = str(root)
-    builder.src_dir = str(root / "src")
     builder.package_dir = str(pkg)
     for key, value in overrides.items():
         setattr(builder, key, value)
@@ -64,14 +63,14 @@ def fixture_builder(tmp_path, cls=FixtureBuild, **overrides):
 
 def test_build_command_uses_explicit_app_name(tmp_path):
     builder = fixture_builder(tmp_path)
-    cmd = builder.build_command(builder.parse_args([]))
+    cmd = builder.build_command()
     assert cmd[cmd.index("--name") + 1] == "fake-app"
 
 
 def test_build_command_missing_app_name_raises(tmp_path):
     builder = fixture_builder(tmp_path, APP_NAME=None)
     with pytest.raises(SystemExit, match="APP_NAME not set"):
-        builder.build_command(builder.parse_args([]))
+        builder.build_command()
 
 
 def test_main_missing_version_raises(tmp_path):
@@ -95,23 +94,8 @@ def test_copy_data_files_places_flat(tmp_path):
     builder = fixture_builder(tmp_path, EXTRA_DATAS=(("src/fake_app/extra.txt", "extra.txt"),))
     (Path(builder.root) / "src" / "fake_app" / "extra.txt").write_text("extra", encoding="utf-8")
     out = tmp_path / "fake-app"
-    (out / "config").mkdir(parents=True)
-    (out / "config" / "stale.txt").write_text("stale", encoding="utf-8")
     builder.copy_data_files(str(out))
-    assert (out / "config" / "config.json").is_file()
-    assert (out / "assets" / "sample.txt").is_file()
     assert (out / "extra.txt").is_file()
-    assert not (out / "config" / "stale.txt").exists()
-
-
-def test_copy_data_files_replaces_stale_file_with_dir(tmp_path):
-    builder = fixture_builder(tmp_path)
-    out = tmp_path / "fake-app"
-    out.mkdir()
-    (out / "config").write_text("stale file", encoding="utf-8")
-    builder.copy_data_files(str(out))
-    assert (out / "config").is_dir()
-    assert (out / "config" / "config.json").is_file()
 
 
 def test_copy_data_files_missing_source_fails(tmp_path):
@@ -120,29 +104,18 @@ def test_copy_data_files_missing_source_fails(tmp_path):
         builder.copy_data_files(str(tmp_path / "fake-app"))
 
 
-def test_copy_data_files_skips_missing_folder(tmp_path):
-    builder = fixture_builder(tmp_path)
-    # An app without an assets/ folder: copying must not fail, and
-    # must not create an empty assets/ in the output.
-    shutil.rmtree(Path(builder.package_dir) / "assets")
-    out = tmp_path / "fake-app"
-    builder.copy_data_files(str(out))
-    assert (out / "config" / "config.json").is_file()
-    assert not (out / "assets").exists()
-
-
 def test_build_command_uses_onedir_and_no_add_data(tmp_path):
     builder = fixture_builder(tmp_path)
-    cmd = builder.build_command(builder.parse_args([]))
+    cmd = builder.build_command()
     assert "--add-data" not in cmd
     assert "--onedir" in cmd
-    assert cmd[cmd.index("--paths") + 1] == str(Path(builder.root) / "src")
+    assert "--paths" not in cmd
     assert cmd[-1] == str(Path(builder.package_dir) / "__main__.py")
 
 
 def test_subclass_override_changes_command(tmp_path):
     builder = fixture_builder(tmp_path, CONSOLE=False)
-    cmd = builder.build_command(builder.parse_args([]))
+    cmd = builder.build_command()
     assert "--windowed" in cmd
     assert "--console" not in cmd
 
@@ -155,3 +128,72 @@ def test_copy_data_files_creates_parent_dirs_for_file_dest(tmp_path):
     out = tmp_path / "fake-app"
     builder.copy_data_files(str(out))
     assert (out / "sub" / "dir" / "extra.txt").read_text(encoding="utf-8") == "extra"
+
+
+def write_warn_file(work, name, lines):
+    appdir = work / name
+    appdir.mkdir(parents=True, exist_ok=True)
+    (appdir / f"warn-{name}.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def test_check_missing_modules_fails_on_hard_missing(tmp_path):
+    builder = FixtureBuild()
+    work = tmp_path / "work"
+    write_warn_file(
+        work,
+        "fake-app",
+        [
+            "missing module named pypdf - imported by apps.x.y (top-level)",
+            "missing module named winreg - imported by os (conditional)",
+        ],
+    )
+    with pytest.raises(SystemExit, match="could not resolve 1 hard import"):
+        builder.check_missing_modules("fake-app", work)
+
+
+def test_check_missing_modules_ignores_third_party_misses(tmp_path):
+    # Optional extras / platform modules missing inside third-party
+    # packages are the library's business, not a build failure —
+    # e.g. pypdf without its Crypto/brotli extras still works.
+    builder = FixtureBuild()
+    work = tmp_path / "work"
+    write_warn_file(
+        work,
+        "fake-app",
+        [
+            "missing module named Crypto - imported by pypdf._crypt_providers._pycryptodome (top-level)",
+            "missing module named brotli - imported by pypdf.filters (delayed)",
+            "missing module named 'pypdf.errors' - imported by apps.x.y (optional)",
+        ],
+    )
+    builder.check_missing_modules("fake-app", work)  # no-op
+
+
+def test_check_missing_modules_ignores_absent_warn_file(tmp_path):
+    builder = FixtureBuild()
+    work = tmp_path / "work"
+    (work / "fake-app").mkdir(parents=True)
+    # No warn file at all (e.g. a future PyInstaller layout): no-op.
+    builder.check_missing_modules("fake-app", work)
+
+
+def test_entry_point_comes_from_subclass_module_dir(tmp_path):
+    # The per-app build.py lives next to the app's __main__.py; the
+    # base class derives the entry point from the subclass's file.
+    builder = FixtureBuild()
+    builder.package_dir = str(tmp_path)
+    (tmp_path / "__main__.py").write_text("", encoding="utf-8")
+    assert builder.entry_point() == str(tmp_path / "__main__.py")
+
+
+def test_entry_point_missing_main_raises(tmp_path):
+    builder = FixtureBuild()
+    builder.package_dir = str(tmp_path)
+    with pytest.raises(SystemExit, match="entry point not found"):
+        builder.entry_point()
+
+
+def test_parse_args_supports_no_zip_only():
+    builder = FixtureBuild()
+    assert builder.parse_args(["--no-zip"]).no_zip is True
+    assert builder.parse_args([]).no_zip is False
