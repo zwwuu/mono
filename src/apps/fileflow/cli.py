@@ -28,9 +28,9 @@ def main(argv=None):
     app.start()
     host = args.host or app.cfg.get("app", "host", "127.0.0.1")
     port = args.port or int(app.cfg.get("app", "port", 8080))
-    from loguru import logger
+    from common.logging import log
 
-    logger.info(
+    log.info(
         "[scheduler] running — daily/weekly/monthly schedules fire automatically; "
         "past-due schedules fire once on startup (catch-up)"
     )

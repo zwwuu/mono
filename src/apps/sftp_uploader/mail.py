@@ -1,12 +1,11 @@
 """Email notifications via SMTP (stdlib smtplib)."""
 from __future__ import annotations
 
-import logging
 import smtplib
 import ssl
 from email.message import EmailMessage
 
-from .log import log
+from common.logging import log
 
 
 def _login(server: smtplib.SMTP, ecfg: dict) -> None:

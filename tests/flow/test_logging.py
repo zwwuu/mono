@@ -15,11 +15,11 @@ from datetime import date
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from loguru import logger
-
 from fileflow.infra.demo import ensure_demo_source
 from fileflow.infra.logging_setup import setup_logging
 from helpers import make_engine, wait_status
+
+from common.logging import log
 
 
 def _read_today_log(log_dir):
@@ -32,8 +32,8 @@ def _read_today_log(log_dir):
 def test_setup_logging_writes_dated_file_and_filters_level():
     with tempfile.TemporaryDirectory() as tmp:
         setup_logging(tmp, level="ERROR", retention_days=7)
-        logger.info("this info must not land in the file")
-        logger.error("this error must land in the file")
+        log.info("this info must not land in the file")
+        log.error("this error must land in the file")
         text = _read_today_log(os.path.join(tmp, "logs"))
         assert "this error must land in the file" in text
         assert "this info must not land in the file" not in text
@@ -43,7 +43,7 @@ def test_setup_logging_is_idempotent():
     with tempfile.TemporaryDirectory() as tmp:
         setup_logging(tmp, level="INFO")
         setup_logging(tmp, level="INFO")  # same params: no duplicate sinks
-        logger.info("exactly once")
+        log.info("exactly once")
         text = _read_today_log(os.path.join(tmp, "logs"))
         assert text.count("exactly once") == 1, text
 

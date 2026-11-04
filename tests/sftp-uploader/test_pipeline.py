@@ -4,10 +4,9 @@ import json
 from unittest import mock
 
 import paramiko
-
-from sftp_uploader.config import load_config
-from sftp_uploader.log import setup_logging
-from sftp_uploader.pipeline import Pipeline
+from apps.sftp_uploader.__main__ import setup_logging_from_config as setup_logging
+from apps.sftp_uploader.config import load_config
+from apps.sftp_uploader.pipeline import Pipeline
 
 
 class FakeSMTP:
@@ -108,7 +107,7 @@ def test_failure_names_step(sftp_server, tmp_path):
 def test_verbose_flag(sftp_server, tmp_path):
     import logging
 
-    from sftp_uploader import __main__ as main_mod
+    from apps.sftp_uploader import __main__ as main_mod
 
     cfg = make_config(tmp_path, sftp_server)
     (tmp_path / "outbox" / "report-v.csv").write_bytes(b"v")
@@ -116,7 +115,9 @@ def test_verbose_flag(sftp_server, tmp_path):
         ["--config", str(tmp_path / "config.json"), "--dry-run", "--verbose"]
     )
     assert code == 0
-    assert logging.getLogger("sftp_uploader").level == logging.DEBUG
+    from common.logging import log
+
+    assert log.level == logging.DEBUG
     setup_logging(cfg)  # restore CRITICAL for subsequent tests
 
 

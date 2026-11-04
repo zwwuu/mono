@@ -2,7 +2,7 @@
 
 Subpackages:
 
-- ``common.logging`` — logger setup (``setup_logging``, ``get_logger``).
+- ``common.logging`` — the shared static logger (``log``) plus ``setup_logging``.
 - ``common.mail`` — SMTP mail client (``MailClient``, ``MailConfig``).
 - ``common.utils`` — paths, config, JSON, and small utilities
   (``load_app_config``, ``app_file_path``, ``retry``, ...).

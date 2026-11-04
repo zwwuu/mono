@@ -8,7 +8,7 @@ from source (`python -m apps.app_one`) and in the exe.
 
 import argparse
 
-from common.logging import get_logger, setup_logging
+from common.logging import log, setup_logging
 from common.mail import MailClient, MailConfig
 from common.utils import app_file_path, load_app_config, read_app_asset
 
@@ -32,8 +32,7 @@ def main(argv=None):
     parser.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING, ...")
     args = parser.parse_args(argv)
 
-    setup_logging(level=args.log_level, name="app-one")
-    log = get_logger("app-one")
+    setup_logging(level=args.log_level)
 
     search_dirs = [args.config_dir] if args.config_dir else None
     config = load_app_config(APP_NAME, defaults=DEFAULT_CONFIG, search_dirs=search_dirs)

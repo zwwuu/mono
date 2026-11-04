@@ -106,8 +106,8 @@ pattern, retry policy, email recipients, log level/rotation — no code changes.
 and register it — nothing else changes:
 
 ```python
+from common.logging import log  # static logger, usable anywhere
 from sftp_uploader.context import RunContext
-from sftp_uploader.log import log  # static logger, usable anywhere
 from sftp_uploader.steps import Step
 
 class ChecksumStep(Step):
@@ -125,8 +125,9 @@ pipeline.execute()
 ```
 
 Retry, logging, step-failure attribution, and both notification emails pick
-the new step up automatically. The logger is static: `from sftp_uploader.log
-import log` in any module gives you the configured logger, no passing around.
+the new step up automatically. The logger is the shared static one:
+`from common.logging import log` in any module gives you the configured
+logger, no passing around.
 
 ## Logs
 

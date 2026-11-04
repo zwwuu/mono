@@ -35,7 +35,8 @@ from datetime import datetime
 
 from fastapi import Body, FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
-from loguru import logger
+
+from common.logging import log
 
 from ..core.engine import AlreadyRunningError, RunLimitExceeded, count_runs_in_period
 from ..core.tasks import TaskError
@@ -362,7 +363,7 @@ def create_app(engine, db, scheduler=None, registry=None):
 def serve(engine, db, host, port, scheduler=None, registry=None):
     import uvicorn
 
-    logger.info(f"FileFlow dashboard: http://{host}:{port}")
+    log.info(f"FileFlow dashboard: http://{host}:{port}")
     uvicorn.run(
         create_app(engine, db, scheduler, registry),
         host=host,

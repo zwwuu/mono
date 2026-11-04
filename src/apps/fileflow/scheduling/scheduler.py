@@ -12,7 +12,7 @@ import threading
 from calendar import monthrange
 from datetime import datetime, timedelta
 
-from loguru import logger
+from common.logging import log
 
 from ..core.engine import ACTIVE_STATUSES, AlreadyRunningError, RunLimitExceeded
 
@@ -243,6 +243,6 @@ class Scheduler:
             if due <= now:
                 run_id, note, _limited = self.fire(sched, actor="scheduler", advance=True)
                 if run_id is not None:
-                    logger.info(f"schedule #{sched['id']} '{sched['name']}' -> run #{run_id}")
+                    log.info(f"schedule #{sched['id']} '{sched['name']}' -> run #{run_id}")
                 else:
-                    logger.debug(f"schedule #{sched['id']} '{sched['name']}': {note}")
+                    log.debug(f"schedule #{sched['id']} '{sched['name']}': {note}")

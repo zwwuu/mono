@@ -9,9 +9,10 @@ click; if any step gets stuck, the operator is emailed and can retry the
 step from the dashboard. Tasks run on demand or on a daily / weekly /
 monthly schedule.
 
-**Four required dependencies** — loguru (logging), SQLAlchemy
+**Three required dependencies** — SQLAlchemy
 (persistence), Playwright (browser sources), and Pydantic (task
-validation), all declared in `pyproject.toml`. Paramiko and requests
+validation), all declared in `pyproject.toml`. Logging uses the
+monorepo's shared static logger (`common.logging`). Paramiko and requests
 are declared for later use (planned SFTP mode and HTTP work).
 pytest-playwright is test-only: runtime steps drive the browser through
 playwright's own API, not pytest fixtures. Everything else
@@ -407,8 +408,8 @@ data/                   runtime state (db, work files, archive, outbox) — crea
 
 ## Notes & limitations
 
-- **Logging** (loguru): every run/step log is mirrored from the DB to
-  the console and to a date-rotated file,
+- **Logging** (shared static logger from `common.logging`): every run/step
+  log is mirrored from the DB to the console and to a date-rotated file,
   `data/logs/fileflow-YYYY-MM-DD.log` (new file at midnight, kept 30
   days). Configure with `app.log_level` (default `INFO`) and
   `app.log_retention_days` (default `30`) in config.json. Per-step

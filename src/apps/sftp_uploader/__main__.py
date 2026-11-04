@@ -5,12 +5,24 @@ import argparse
 import logging
 import sys
 
+from common.logging import log, setup_logging
+
 from . import __version__
 from .config import ConfigError, load_config
 from .context import RunContext
-from .log import log, setup_logging
 from .pipeline import Pipeline
 from .steps import FindFileStep
+
+
+def setup_logging_from_config(config):
+    """Configure the shared static log from the ``logging`` config section."""
+    lcfg = config.get("logging", {}) or {}
+    return setup_logging(
+        level=lcfg.get("level", "INFO"),
+        log_file=lcfg.get("file"),
+        max_bytes=int(lcfg.get("max_bytes", 1_048_576)),
+        backup_count=int(lcfg.get("backup_count", 3)),
+    )
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
-    setup_logging(config)
+    setup_logging_from_config(config)
     if args.verbose:
         log.setLevel(logging.DEBUG)
         for handler in log.handlers:

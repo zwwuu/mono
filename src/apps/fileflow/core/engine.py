@@ -9,11 +9,11 @@
 import threading
 from datetime import datetime, timedelta
 
-from loguru import logger
+from common.logging import log
 
+from ..infra.notify import send_email
 from . import steps as steps_mod
 from . import tasks as tasks_mod
-from ..infra.notify import send_email
 
 STEP_TIMEOUT_DEFAULT = 300  # seconds per step unless config overrides
 
@@ -120,7 +120,7 @@ class Engine:
         # Mirror to the app logger (console + date-rotated file). The DB
         # row stays the dashboard's source of truth; this is the
         # operator's tail-able transcript.
-        log_fn = getattr(logger, level.lower(), logger.info)
+        log_fn = getattr(log, level.lower(), log.info)
         log_fn(f"[run #{run_id}] {message}")
         return entry
 

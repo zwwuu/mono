@@ -15,9 +15,10 @@ import os
 import time
 import traceback
 
+from common.logging import log
+
 from . import mail
 from .context import RunContext
-from .log import log
 from .steps import ConnectStep, FindFileStep, Step, UploadStep, VerifyStep
 
 

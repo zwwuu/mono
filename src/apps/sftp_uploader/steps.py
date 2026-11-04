@@ -1,7 +1,7 @@
 """Pipeline steps (SFTP transport via paramiko).
 
 Each step is a :class:`Step` subclass: set ``name`` and implement ``run``.
-Steps use the static :mod:`sftp_uploader.log` logger directly and share
+Steps use the shared static :mod:`common.logging` logger directly and share
 state through a :class:`sftp_uploader.context.RunContext`.
 """
 from __future__ import annotations
@@ -11,8 +11,9 @@ import os
 import posixpath
 from datetime import datetime
 
+from common.logging import log
+
 from .context import RunContext
-from .log import log
 
 
 class Step:

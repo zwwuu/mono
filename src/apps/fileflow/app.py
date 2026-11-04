@@ -19,9 +19,9 @@ class App:
             level=cfg.get("app", "log_level", "INFO"),
             retention_days=int(cfg.get("app", "log_retention_days", 30)),
         )
-        from loguru import logger
+        from common.logging import log
 
-        logger.info(f"FileFlow {__version__} starting (data_dir={cfg.data_dir})")
+        log.info(f"FileFlow {__version__} starting (data_dir={cfg.data_dir})")
         self.db = DB(cfg.path("fileflow.db"))
         self.registry = TaskRegistry(cfg)
         self.engine = Engine(cfg, self.db, self.registry)
