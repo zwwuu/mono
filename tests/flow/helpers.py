@@ -6,15 +6,12 @@ temporary data dir, a tasks.json, a DB, a registry and an Engine.
 
 import json
 import os
-import sys
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-
-from fileflow.config import Config  # noqa: E402
-from fileflow.core.engine import Engine  # noqa: E402
-from fileflow.core.tasks import TaskRegistry  # noqa: E402
-from fileflow.infra.db import DB  # noqa: E402
+from apps.fileflow.config import Config
+from apps.fileflow.core.engine import Engine
+from apps.fileflow.core.tasks import TaskRegistry
+from apps.fileflow.infra.db import DB
 
 DATA_SUBDIRS = (
     "work",

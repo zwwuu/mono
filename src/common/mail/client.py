@@ -9,12 +9,12 @@ Secrets never live in app config files: use MailConfig.from_env()
 MAIL_USE_TLS / MAIL_USE_SSL) or pass a MailConfig explicitly.
 """
 
-import logging
 import smtplib
 from dataclasses import dataclass
 from email.message import EmailMessage
 from pathlib import Path
 
+from common.logging import log
 from common.utils.misc import getenv, getenv_bool, getenv_int
 
 __all__ = ["MailClient", "MailConfig"]
@@ -53,7 +53,7 @@ class MailClient:
         self.config = config or MailConfig()
         # Dry-run unless explicitly disabled AND a host is configured.
         self.dry_run = self.config.host == "" if dry_run is None else dry_run
-        self.log = logger or logging.getLogger(__name__)
+        self.log = logger or log
 
     def send(self, to, subject, body, html=None, attachments=None):
         """Send one message. `to` is an address or a list. Returns bool.

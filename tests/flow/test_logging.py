@@ -9,17 +9,13 @@ no duplicate sinks on re-setup, and engine log mirroring to the file.
 """
 
 import os
-import sys
 import tempfile
 from datetime import date
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-
-from fileflow.infra.demo import ensure_demo_source
-from fileflow.infra.logging_setup import setup_logging
-from helpers import make_engine, wait_status
-
+from apps.fileflow.infra.demo import ensure_demo_source
+from apps.fileflow.infra.logging_setup import setup_logging
 from common.logging import log
+from tests.flow.helpers import make_engine, wait_status
 
 
 def _read_today_log(log_dir):

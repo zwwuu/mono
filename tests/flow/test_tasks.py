@@ -11,21 +11,18 @@ multi-approval / conditional-notify / failure-template scenarios.
 
 import json
 import os
-import sys
 import tempfile
 import time
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-
-from fileflow.core.steps import render_rename
-from fileflow.core.tasks import (
+from apps.fileflow.core.steps import render_rename
+from apps.fileflow.core.tasks import (
     TaskError,
     build_pipeline,
     validate_task,
 )
-from fileflow.infra.demo import DemoProcessor, demo_mappings, ensure_demo_source
-from fileflow.scheduling.scheduler import Scheduler
-from helpers import (
+from apps.fileflow.infra.demo import DemoProcessor, demo_mappings, ensure_demo_source
+from apps.fileflow.scheduling.scheduler import Scheduler
+from tests.flow.helpers import (
     make_engine,
     open_registry,
     outbox_texts,

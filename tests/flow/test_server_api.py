@@ -14,9 +14,9 @@ import time
 import urllib.error
 import urllib.request
 
-from helpers import make_engine
-from fileflow.infra.demo import ensure_demo_source
-from fileflow.web.server import create_app
+from apps.fileflow.infra.demo import ensure_demo_source
+from apps.fileflow.web.server import create_app
+from tests.flow.helpers import make_engine
 
 TASK = {
     "id": "api-task",

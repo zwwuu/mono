@@ -1,10 +1,9 @@
 """Command-line entry point: ``python -m sftp_uploader``."""
 from __future__ import annotations
 
-import argparse
-import logging
 import sys
 
+from common.cli import build_parser
 from common.logging import log, setup_logging
 
 from . import __version__
@@ -14,11 +13,15 @@ from .pipeline import Pipeline
 from .steps import FindFileStep
 
 
-def setup_logging_from_config(config):
-    """Configure the shared static log from the ``logging`` config section."""
+def setup_logging_from_config(config, verbose=False):
+    """Configure the shared static log from the ``logging`` config section.
+
+    ``verbose`` forces DEBUG regardless of the config file's logging.level.
+    """
     lcfg = config.get("logging", {}) or {}
+    level = "DEBUG" if verbose else lcfg.get("level", "INFO")
     return setup_logging(
-        level=lcfg.get("level", "INFO"),
+        level=level,
         log_file=lcfg.get("file"),
         max_bytes=int(lcfg.get("max_bytes", 1_048_576)),
         backup_count=int(lcfg.get("backup_count", 3)),
@@ -26,17 +29,15 @@ def setup_logging_from_config(config):
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(
+    parser = build_parser(
         prog="sftp-uploader",
         description="Find a local file by pattern and upload it to an SFTP server.",
+        version=__version__,
+        with_config=True,
+        with_dry_run=True,
+        with_verbose=True,
     )
-    ap.add_argument("--config", default="config.json", help="path to config.json (default: ./config.json)")
-    ap.add_argument("--dry-run", action="store_true",
-                    help="only run the find_file step and print what would be uploaded")
-    ap.add_argument("-v", "--verbose", action="store_true",
-                    help="DEBUG logging regardless of the config file's logging.level")
-    ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    args = ap.parse_args(argv)
+    args = parser.parse_args(argv)
 
     try:
         config = load_config(args.config)
@@ -44,11 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
-    setup_logging_from_config(config)
+    setup_logging_from_config(config, verbose=args.verbose)
     if args.verbose:
-        log.setLevel(logging.DEBUG)
-        for handler in log.handlers:
-            handler.setLevel(logging.DEBUG)
         log.debug("verbose: DEBUG logging forced by --verbose")
     log.info("starting sftp-uploader %s (config: %s)", __version__, args.config)
 

@@ -13,19 +13,16 @@ completes), and scheduling (due schedule fires, run-now, overlap guard).
 
 import hashlib
 import os
-import sys
 import tempfile
 import threading
 import time
 from datetime import datetime
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-
-from fileflow.core.engine import AlreadyRunningError, RunLimitExceeded, count_runs_in_period
-from fileflow.infra.demo import DemoProcessor, ensure_demo_source
-from fileflow.scheduling import scheduler as sched_mod
-from fileflow.scheduling.scheduler import Scheduler
-from helpers import make_engine, wait_status
+from apps.fileflow.core.engine import AlreadyRunningError, RunLimitExceeded, count_runs_in_period
+from apps.fileflow.infra.demo import DemoProcessor, ensure_demo_source
+from apps.fileflow.scheduling import scheduler as sched_mod
+from apps.fileflow.scheduling.scheduler import Scheduler
+from tests.flow.helpers import make_engine, wait_status
 
 FULL_TASK = {
     "id": "smoke-full",

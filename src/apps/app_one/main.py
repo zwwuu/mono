@@ -6,8 +6,7 @@ module as apps.app_one.main, so the relative imports resolve both
 from source (`python -m apps.app_one`) and in the exe.
 """
 
-import argparse
-
+from common.cli import build_parser, resolve_log_level
 from common.logging import log, setup_logging
 from common.mail import MailClient, MailConfig
 from common.utils import app_file_path, load_app_config, read_app_asset
@@ -23,16 +22,15 @@ DEFAULT_CONFIG = {
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(prog=APP_NAME, description="Build a report and email it.")
-    parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
-    parser.add_argument("--dry-run", action="store_true", help="log the mail instead of sending it")
+    parser = build_parser(
+        APP_NAME, "Build a report and email it.", __version__, with_dry_run=True
+    )
     parser.add_argument(
         "--config-dir", default=None, help="directory holding config.json (overrides)"
     )
-    parser.add_argument("--log-level", default="INFO", help="DEBUG, INFO, WARNING, ...")
     args = parser.parse_args(argv)
 
-    setup_logging(level=args.log_level)
+    setup_logging(level=resolve_log_level(args))
 
     search_dirs = [args.config_dir] if args.config_dir else None
     config = load_app_config(APP_NAME, defaults=DEFAULT_CONFIG, search_dirs=search_dirs)

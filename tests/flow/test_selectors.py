@@ -1,16 +1,12 @@
-# Tests for FileFlow v0.6.0 selectors: table rows, text, role, chain,
-# custom kinds — all against a real Chromium via a local table page.
-import os
-import sys
+"""Tests for FileFlow v0.6.0 selectors: table rows, text, role, chain,
+custom kinds — all against a real Chromium via a local table page."""
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-
-from fileflow.infra.browser_fetch import (  # noqa: E402
+from apps.fileflow.infra.browser_fetch import (
     SELECTOR_RESOLVERS,
     BrowserSourceError,
     register_selector,

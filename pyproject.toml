@@ -60,6 +60,9 @@ testpaths = ["tests"]
 # Tests import apps.* from src/ and tests.* from the repo root,
 # without requiring an install first.
 pythonpath = [".", "src"]
+# pytest's default norecursedirs skips any directory named "build";
+# keep the default list minus "build" so tests/build/ is collected.
+norecursedirs = [".*", "dist", "CVS", "_darcs", "{arch}", "*.egg", "venv"]
 
 [tool.ruff]
 line-length = 100

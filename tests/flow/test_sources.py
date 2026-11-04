@@ -1,6 +1,5 @@
-# Tests for FileFlow v0.5.0 sources: ftp, smb, local-dir, browser.
+"""Tests for FileFlow v0.5.0 sources: ftp, smb, local-dir, browser."""
 import os
-import sys
 import tempfile
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -8,18 +7,14 @@ from urllib.parse import parse_qs
 
 import pytest
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-from helpers import make_engine, seed, wait_status  # noqa: E402
-
-from fileflow.core.tasks import TaskError, validate_task  # noqa: E402
-from fileflow.infra import transfers  # noqa: E402
-from fileflow.infra.browser_fetch import (  # noqa: E402
+from apps.fileflow.core.tasks import TaskError, validate_task
+from apps.fileflow.infra import transfers
+from apps.fileflow.infra.browser_fetch import (
     BrowserSourceError,
     validate_actions,
 )
-from fileflow.infra.demo import ensure_demo_source  # noqa: E402
+from apps.fileflow.infra.demo import ensure_demo_source
+from tests.flow.helpers import make_engine, seed, wait_status
 
 
 def test_pick_entry():
@@ -126,7 +121,7 @@ def test_browser_validation():
 
 
 def test_browser_dispatch_mocked(monkeypatch):
-    import fileflow.infra.browser_fetch as browser_mod
+    import apps.fileflow.infra.browser_fetch as browser_mod
 
     def fake_run(source, dest_dir, log):
         path = os.path.join(dest_dir, "portal-report.csv")
@@ -162,7 +157,7 @@ def test_browser_dispatch_mocked(monkeypatch):
 def test_browser_missing_chromium(monkeypatch):
     """With no Chromium binary available, a browser source fails with a
     clear 'playwright install chromium' message, not a raw launch error."""
-    import fileflow.infra.browser_fetch as browser_mod
+    import apps.fileflow.infra.browser_fetch as browser_mod
 
     class _NoBinary:
         class chromium:
@@ -241,7 +236,7 @@ def test_browser_real_login_download():
     Skipped when Playwright/Chromium is unavailable in this environment.
     """
     try:
-        from fileflow.infra.browser_fetch import run_browser_source
+        from apps.fileflow.infra.browser_fetch import run_browser_source
     except Exception:
         pytest.skip("browser_fetch unavailable")
     try:

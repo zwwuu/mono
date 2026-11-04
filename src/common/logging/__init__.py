@@ -25,7 +25,7 @@ from logging.handlers import RotatingFileHandler
 _DEFAULT_FORMAT = "%(asctime)s | %(levelname)-7s | %(name)s | %(message)s"
 _LOGGER_NAME = "mono"
 
-__all__ = ["log", "get_logger", "setup_logging"]
+__all__ = ["get_logger", "log", "setup_logging"]
 
 log = logging.getLogger(_LOGGER_NAME)
 """The shared static logger: ``from common.logging import log`` anywhere."""
