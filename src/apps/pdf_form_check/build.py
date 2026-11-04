@@ -11,13 +11,12 @@ Run as a module from the repo root, never as a file:
 
 from apps.pdf_form_check.meta import APP_NAME, __version__
 
-from ..build_config import DefaultBuildConfig
+from common.build_config.build_config import DefaultBuildConfig
 
 
 class PdfFormCheckBuild(DefaultBuildConfig):
     APP_NAME = APP_NAME
     VERSION = __version__
-    PACKAGE = "apps.pdf_form_check"
     CONSOLE = True
 
 

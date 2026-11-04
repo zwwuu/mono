@@ -1,0 +1,49 @@
+{
+  "email": {
+    "enabled": true,
+    "from": "sftp-uploader@example.com",
+    "password": {
+      "env": "SMTP_PASSWORD"
+    },
+    "smtp_host": "smtp.example.com",
+    "smtp_port": 587,
+    "subject_prefix": "[sftp-uploader]",
+    "to": [
+      "ops@example.com"
+    ],
+    "use_tls": true,
+    "username": "uploader@example.com"
+  },
+  "file": {
+    "local_dir": "./outbox",
+    "pattern": "report-%Y%m%d.csv",
+    "pick": "newest"
+  },
+  "logging": {
+    "backup_count": 3,
+    "file": "sftp-uploader.log",
+    "level": "INFO",
+    "max_bytes": 1048576
+  },
+  "retry": {
+    "backoff_max_seconds": 300,
+    "backoff_seconds": 10,
+    "max_attempts": 3
+  },
+  "sftp": {
+    "create_remote_dir": true,
+    "host": "sftp.example.com",
+    "host_key_policy": "auto_add",
+    "key_file": null,
+    "key_passphrase": null,
+    "on_existing": "overwrite",
+    "password": {
+      "env": "SFTP_PASSWORD"
+    },
+    "port": 22,
+    "remote_dir": "/uploads",
+    "timeout": 30,
+    "username": "uploader"
+  },
+  "verify": true
+}

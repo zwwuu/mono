@@ -9,7 +9,23 @@ description = "Python monorepo template: several apps sharing common libraries, 
 readme = "README.md"
 requires-python = ">=3.10"
 # becomes available to all apps (see README).
-dependencies = ["pypdf>=4",  "pyinstaller>=6"]
+dependencies = [
+    "paramiko>=5.1.0",
+    "playwright>=1.64.1",
+    "fastapi[standard-no-fastapi-cloud-cli]>=0.162.0",
+    "pydantic>=2.14.2",
+    "requests>=2.34.2",
+    "sqlalchemy>=2.0.57",
+    "uvicorn>=0.54.0",
+    "pytest-playwright>=0.10.0",
+    "smbprotocol>=1.17.0",
+    "pytest>=9.2.0",
+    "loguru>=0.7.3",
+    "ruff>=0.17.3",
+    "pypdf>=6.21.4",
+    "pyinstaller>=6.22.3",
+    "reportlab>=5.1.0",
+]
 
 # One console command per app: `app-one` etc. after install.
 # The packages live under src/apps/, so the entry points are the
@@ -18,13 +34,12 @@ dependencies = ["pypdf>=4",  "pyinstaller>=6"]
 [project.scripts]
 app-one = "apps.app_one.main:main"
 pdf-form-check = "apps.pdf_form_check.cli:main"
+fileflow = "fileflow.cli:main"
 
 [project.optional-dependencies]
 # Everything needed for development, testing, and building exes.
 # reportlab is only for generating fixture PDFs in the tests.
 dev = [
-    "pytest>=8",
-    "ruff>=0.6",
     "reportlab>=4",
 ]
 
