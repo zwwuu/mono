@@ -1,9 +1,10 @@
 import json
 from datetime import datetime, timezone
-from typing import List, Dict, Optional
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text
+
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.orm import relationship
-from app.database import Base
+
+from common.db import Base
 
 
 def utc_now():
@@ -37,7 +38,7 @@ class User(Base):
     step_histories = relationship("WorkflowStepHistory", back_populates="actor")
 
     @property
-    def roles(self) -> List[str]:
+    def roles(self) -> list[str]:
         """Returns the list of global/feature roles assigned to this user."""
         try:
             items = json.loads(self.roles_raw or "[]")
@@ -53,12 +54,12 @@ class User(Base):
         return [self.role] if self.role else ["requester"]
 
     @roles.setter
-    def roles(self, value: List[str]):
+    def roles(self, value: list[str]):
         clean = list(dict.fromkeys(r.strip() for r in value if r and isinstance(r, str)))
         self.roles_raw = json.dumps(clean)
 
     @property
-    def workflow_roles(self) -> Dict[str, List[str]]:
+    def workflow_roles(self) -> dict[str, list[str]]:
         """Returns dictionary of workflow-specific feature roles."""
         try:
             data = json.loads(self.workflow_roles_raw or "{}")
@@ -69,10 +70,10 @@ class User(Base):
         return {}
 
     @workflow_roles.setter
-    def workflow_roles(self, value: Dict[str, List[str]]):
+    def workflow_roles(self, value: dict[str, list[str]]):
         self.workflow_roles_raw = json.dumps(value or {})
 
-    def has_role(self, target_role: str, workflow_type: Optional[str] = None) -> bool:
+    def has_role(self, target_role: str, workflow_type: str | None = None) -> bool:
         """
         Determines whether the user possesses the target role globally,
         within their multi-roles list, or within the specific workflow context.
@@ -91,7 +92,7 @@ class User(Base):
                 return True
         return False
 
-    def get_roles_for_workflow(self, workflow_type: Optional[str] = None) -> List[str]:
+    def get_roles_for_workflow(self, workflow_type: str | None = None) -> list[str]:
         """Returns all effective roles held by this user for the specified workflow."""
         roles = list(self.roles)
         if workflow_type and workflow_type in self.workflow_roles:

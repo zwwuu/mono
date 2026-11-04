@@ -1,12 +1,13 @@
 import logging
-from typing import Optional, Dict
+from typing import Dict, Optional
+
+from ldap3 import ALL, SUBTREE, Connection, Server
+from ldap3.core.exceptions import LDAPException
 from sqlalchemy.orm import Session
 from starlette.requests import Request
-from ldap3 import Server, Connection, ALL, SUBTREE
-from ldap3.core.exceptions import LDAPException
 
-from app.config import settings
-from app.models.user import User
+from apps.workflow_app.config import settings
+from apps.workflow_app.models.user import User
 
 logger = logging.getLogger("workflow.auth")
 

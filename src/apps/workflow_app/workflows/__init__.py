@@ -1,12 +1,18 @@
-from app.workflows.base import FormField, WorkflowStepDef, WorkflowDefinition, ReminderConfig, WorkflowRole
-from app.workflows.registry import WorkflowRegistry
-from app.workflows.definitions import (
-    PURCHASE_REQUEST_WORKFLOW,
-    IT_ACCESS_WORKFLOW,
-    EXPENSE_REIMBURSEMENT_WORKFLOW,
-    REMOTE_VPN_WORKFLOW,
-    CAPITAL_PROJECT_WORKFLOW,
+from apps.workflow_app.workflows.base import (
+    FormField,
+    ReminderConfig,
+    WorkflowDefinition,
+    WorkflowRole,
+    WorkflowStepDef,
 )
+from apps.workflow_app.workflows.definitions import (
+    CAPITAL_PROJECT_WORKFLOW,
+    EXPENSE_REIMBURSEMENT_WORKFLOW,
+    IT_ACCESS_WORKFLOW,
+    PURCHASE_REQUEST_WORKFLOW,
+    REMOTE_VPN_WORKFLOW,
+)
+from apps.workflow_app.workflows.registry import WorkflowRegistry
 
 # Register default built-in workflows
 WorkflowRegistry.register(PURCHASE_REQUEST_WORKFLOW)

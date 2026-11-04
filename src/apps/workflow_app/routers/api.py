@@ -1,17 +1,22 @@
 from datetime import datetime
 from typing import List
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models.user import User
-from app.models.workflow import WorkflowInstance, WorkflowStepHistory, AuditLog
-from app.schemas.workflow import WorkflowCreateRequest, WorkflowStepActionRequest, WorkflowResponse
-from app.schemas.user import UserRead
-from app.dependencies import require_user
-from app.services.workflow_engine import WorkflowEngine
-from app.services.mail_service import EmailService
-from app.services.scheduler_service import SchedulerService
+from apps.workflow_app.database import get_db
+from apps.workflow_app.dependencies import require_user
+from apps.workflow_app.models.user import User
+from apps.workflow_app.models.workflow import WorkflowInstance, WorkflowStepHistory
+from apps.workflow_app.schemas.user import UserRead
+from apps.workflow_app.schemas.workflow import (
+    WorkflowCreateRequest,
+    WorkflowResponse,
+    WorkflowStepActionRequest,
+)
+from apps.workflow_app.services.mail_service import EmailService
+from apps.workflow_app.services.scheduler_service import SchedulerService
+from apps.workflow_app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter(prefix="/api", tags=["REST API"])
 
@@ -42,7 +47,7 @@ async def get_workflow_api(
     return workflow
 
 
-from app.services.workflow_engine import WorkflowEngine, WorkflowRegistry
+from apps.workflow_app.services.workflow_engine import WorkflowEngine, WorkflowRegistry
 
 
 @router.post("/workflows", response_model=WorkflowResponse, status_code=status.HTTP_201_CREATED)

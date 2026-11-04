@@ -1,23 +1,28 @@
-from typing import Dict, List, Optional, Any
 from datetime import datetime, timezone
+from typing import Any, Dict, Optional
+
 from sqlalchemy.orm import Session, object_session
 
-from app.models.workflow import WorkflowInstance, WorkflowStepHistory, AuditLog, StepApproval
-from app.models.user import User
-from app.services.mail_service import EmailService
-from app.services.scheduler_service import SchedulerService
+from apps.workflow_app.models.user import User
+from apps.workflow_app.models.workflow import (
+    AuditLog,
+    StepApproval,
+    WorkflowInstance,
+    WorkflowStepHistory,
+)
+from apps.workflow_app.services.mail_service import EmailService
+from apps.workflow_app.services.scheduler_service import SchedulerService
 
 # Import modular workflow domain classes and registry
-from app.workflows import (
-    FormField,
-    WorkflowStepDef,
-    WorkflowDefinition,
-    ReminderConfig,
-    WorkflowRegistry,
-    PURCHASE_REQUEST_WORKFLOW,
-    IT_ACCESS_WORKFLOW,
+from apps.workflow_app.workflows import (
     EXPENSE_REIMBURSEMENT_WORKFLOW,
+    IT_ACCESS_WORKFLOW,
+    PURCHASE_REQUEST_WORKFLOW,
     REMOTE_VPN_WORKFLOW,
+    FormField,
+    WorkflowDefinition,
+    WorkflowRegistry,
+    WorkflowStepDef,
 )
 
 # Backward-compatible dictionary access

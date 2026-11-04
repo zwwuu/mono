@@ -1,11 +1,11 @@
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timezone
-from typing import List, Dict, Optional
 import logging
+import smtplib
+from datetime import datetime, timezone
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from typing import Dict, List, Optional
 
-from app.config import settings
+from apps.workflow_app.config import settings
 
 logger = logging.getLogger("workflow.mail")
 

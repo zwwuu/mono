@@ -1,42 +1,22 @@
-from sqlalchemy import create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
-from app.config import settings
+"""workflow-app's database: shared setup from common.db, app-specific init."""
 
-# Configure engine depending on whether SQLite or MySQL is used
-is_sqlite = settings.DATABASE_URL.startswith("sqlite")
+from sqlalchemy import text
 
-engine_kwargs = {}
-if is_sqlite:
-    engine_kwargs["connect_args"] = {"check_same_thread": False}
-else:
-    # Recommended settings for MySQL connections
-    engine_kwargs.update({
-        "pool_size": 10,
-        "max_overflow": 20,
-        "pool_recycle": 3600,
-        "pool_pre_ping": True,
-    })
+from apps.workflow_app.config import settings
+from common.db import Base, Database
 
-engine = create_engine(settings.DATABASE_URL, **engine_kwargs)
+__all__ = ["Base", "SessionLocal", "db", "engine", "get_db", "init_db"]
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-Base = declarative_base()
-
-
-def get_db():
-    """Dependency that creates a new database session per request and closes it after."""
-    db: Session = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
+db = Database(settings.DATABASE_URL)
+engine = db.engine
+SessionLocal = db.SessionLocal
+get_db = db.get_db
 
 
 def init_db():
     """Initializes tables in database and creates default demo users if missing."""
-    import app.models  # noqa: F401
-    Base.metadata.create_all(bind=engine)
+    import apps.workflow_app.models  # noqa: F401
+    db.create_all()
 
     # Lightweight migration check for existing user table columns
     with engine.connect() as conn:
@@ -52,7 +32,7 @@ def init_db():
         ]:
             try:
                 conn.execute(
-                    __import__("sqlalchemy").text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type} DEFAULT {default_val}")
+                    text(f"ALTER TABLE users ADD COLUMN {col_name} {col_type} DEFAULT {default_val}")
                 )
                 conn.commit()
             except Exception:
@@ -60,10 +40,9 @@ def init_db():
                 pass
 
     # Seed default mock users for easy first run
-    from app.services.auth_service import seed_initial_users
-    db = SessionLocal()
+    from apps.workflow_app.services.auth_service import seed_initial_users
+    session = SessionLocal()
     try:
-        seed_initial_users(db)
+        seed_initial_users(session)
     finally:
-        db.close()
-
+        session.close()

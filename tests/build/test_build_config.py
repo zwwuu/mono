@@ -143,7 +143,7 @@ def test_check_missing_modules_fails_on_hard_missing(tmp_path):
         work,
         "fake-app",
         [
-            "missing module named pypdf - imported by apps.x.y (top-level)",
+            "missing module named no_such_module_xyz - imported by apps.x.y (top-level)",
             "missing module named winreg - imported by os (conditional)",
         ],
     )
@@ -164,6 +164,22 @@ def test_check_missing_modules_ignores_third_party_misses(tmp_path):
             "missing module named Crypto - imported by pypdf._crypt_providers._pycryptodome (top-level)",
             "missing module named brotli - imported by pypdf.filters (delayed)",
             "missing module named 'pypdf.errors' - imported by apps.x.y (optional)",
+        ],
+    )
+    builder.check_missing_modules("fake-app", work)  # no-op
+
+
+def test_check_missing_modules_ignores_resolvable_attributes(tmp_path):
+    # PyInstaller misreports dotted attributes (e.g. pydantic.BaseModel)
+    # as missing modules. If the real import system resolves the name,
+    # the frozen exe will too — not a build failure.
+    builder = FixtureBuild()
+    work = tmp_path / "work"
+    write_warn_file(
+        work,
+        "fake-app",
+        [
+            "missing module named pydantic.BaseModel - imported by apps.x.y (top-level)",
         ],
     )
     builder.check_missing_modules("fake-app", work)  # no-op

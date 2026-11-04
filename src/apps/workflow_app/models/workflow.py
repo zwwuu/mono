@@ -1,8 +1,10 @@
 import json
 from datetime import datetime, timezone
-from sqlalchemy import Column, Integer, String, Boolean, Text, DateTime, ForeignKey
+
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
-from app.database import Base
+
+from common.db import Base
 
 
 def utc_now():

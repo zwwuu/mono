@@ -8,7 +8,13 @@ Demonstrates:
 - Approver amount threshold needed (2 distinct approvals required).
 """
 
-from app.workflows.base import WorkflowDefinition, WorkflowStepDef, FormField, ReminderConfig, WorkflowRole
+from apps.workflow_app.workflows.base import (
+    FormField,
+    ReminderConfig,
+    WorkflowDefinition,
+    WorkflowRole,
+    WorkflowStepDef,
+)
 
 CAPITAL_PROJECT_WORKFLOW = WorkflowDefinition(
     type_id="capital_project",

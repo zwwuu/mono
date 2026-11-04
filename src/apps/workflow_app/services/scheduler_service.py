@@ -24,17 +24,17 @@ SchedulerService.schedule_step_reminders().
 
 import logging
 import uuid
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.jobstores.sqlalchemy import SQLAlchemyJobStore
+from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.date import DateTrigger
 from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.models.workflow import ScheduledTask, WorkflowInstance
-from app.models.user import User
+from apps.workflow_app.config import settings
+from apps.workflow_app.models.user import User
+from apps.workflow_app.models.workflow import ScheduledTask, WorkflowInstance
 
 logger = logging.getLogger(__name__)
 
@@ -79,11 +79,11 @@ def _fire_reminder(job_id: str, db_url: str) -> None:
         else:
             recipients = db.query(User).filter(
                 User.role == recipient_role,
-                User.is_active == True  # noqa: E712
+                User.is_active == True
             ).all()
 
         # Send emails
-        from app.services.mail_service import EmailService
+        from apps.workflow_app.services.mail_service import EmailService
         for user in recipients:
             if user and user.email:
                 EmailService.notify_reminder(
@@ -156,7 +156,7 @@ class SchedulerService:
 
         Should be called after a workflow transitions into a new step.
         """
-        from app.services.workflow_engine import WorkflowEngine
+        from apps.workflow_app.services.workflow_engine import WorkflowEngine
 
         definition = WorkflowEngine.get_definition(workflow.workflow_type)
         if not definition:
@@ -243,8 +243,8 @@ class SchedulerService:
         """
         query = db.query(ScheduledTask).filter(
             ScheduledTask.workflow_id == workflow.id,
-            ScheduledTask.is_fired == False,  # noqa: E712
-            ScheduledTask.is_cancelled == False,  # noqa: E712
+            ScheduledTask.is_fired == False,
+            ScheduledTask.is_cancelled == False,
         )
         if step_id:
             query = query.filter(ScheduledTask.job_id.contains(f"_{step_id}_"))

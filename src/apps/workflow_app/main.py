@@ -1,14 +1,22 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import RedirectResponse
-from starlette.middleware.sessions import SessionMiddleware
-from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.config import settings
-from app.database import init_db
-from app.routers import auth_router, workflows_router, dev_router, api_router, scheduled_tasks_router
-from app.services.scheduler_service import SchedulerService
+from fastapi import FastAPI, Request
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.sessions import SessionMiddleware
+
+from apps.workflow_app.config import settings
+from apps.workflow_app.database import init_db
+from apps.workflow_app.paths import app_dir
+from apps.workflow_app.routers import (
+    api_router,
+    auth_router,
+    dev_router,
+    scheduled_tasks_router,
+    workflows_router,
+)
+from apps.workflow_app.services.scheduler_service import SchedulerService
 
 
 @asynccontextmanager
@@ -40,7 +48,7 @@ app.add_middleware(
 )
 
 # Mount static assets
-app.mount("/static", StaticFiles(directory="app/static"), name="static")
+app.mount("/static", StaticFiles(directory=str(app_dir() / "static")), name="static")
 
 # Register routers
 app.include_router(auth_router)
@@ -51,7 +59,8 @@ app.include_router(scheduled_tasks_router)
 
 
 from fastapi.responses import JSONResponse
-from app.dependencies import RedirectException
+
+from apps.workflow_app.dependencies import RedirectException
 
 
 @app.exception_handler(RedirectException)
@@ -69,7 +78,7 @@ async def custom_http_exception_handler(request: Request, exc: StarletteHTTPExce
 def start():
     """CLI entrypoint to run the uvicorn development server."""
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("apps.workflow_app.main:app", host="0.0.0.0", port=8000, reload=True)
 
 
 if __name__ == "__main__":

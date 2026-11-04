@@ -1,4 +1,10 @@
-from app.workflows.base import WorkflowDefinition, WorkflowStepDef, FormField, ReminderConfig, WorkflowRole
+from apps.workflow_app.workflows.base import (
+    FormField,
+    ReminderConfig,
+    WorkflowDefinition,
+    WorkflowRole,
+    WorkflowStepDef,
+)
 
 PURCHASE_REQUEST_WORKFLOW = WorkflowDefinition(
     type_id="purchase_request",

@@ -1,5 +1,6 @@
 import argparse
 import datetime
+import importlib
 import shutil
 import subprocess
 import sys
@@ -80,6 +81,29 @@ class DefaultBuildConfig:
         cmd.append(self.entry_point())
         return cmd
 
+    @staticmethod
+    def _resolvable(name):
+        """True if `name` is importable here, or is an attribute of an
+        importable parent package.
+
+        PyInstaller's analysis sometimes reports a dotted attribute
+        (e.g. pydantic.BaseModel) as a "missing module". If the real
+        import system resolves it, the frozen exe will too — only a
+        name that fails here is a genuine missing dependency.
+        """
+        try:
+            importlib.import_module(name)
+            return True
+        except ImportError:
+            pass
+        parent, _, attr = name.rpartition(".")
+        if not parent:
+            return False
+        try:
+            return hasattr(importlib.import_module(parent), attr)
+        except ImportError:
+            return False
+
     def check_missing_modules(self, name, workpath):
         """Fail the build if PyInstaller could not resolve a hard dependency.
 
@@ -94,9 +118,11 @@ class DefaultBuildConfig:
         genuinely hard third-party dependency would already break
         `pip install -e .` in this same environment. Entries marked
         "optional" or "conditional" (try/except ImportError, platform
-        checks) never fail. If the warn file isn't where expected (a
-        future PyInstaller layout), the check is skipped rather than
-        blocking the build.
+        checks) never fail, and neither do names the real import
+        system resolves (PyInstaller misreports dotted attributes
+        like pydantic.BaseModel as missing modules). If the warn file
+        isn't where expected (a future PyInstaller layout), the check
+        is skipped rather than blocking the build.
         """
         warn_path = Path(workpath) / name / f"warn-{name}.txt"
         if not warn_path.is_file():
@@ -107,6 +133,9 @@ class DefaultBuildConfig:
         problems = []
         for line in warn_path.read_text(encoding="utf-8", errors="replace").splitlines():
             if not line.startswith("missing module named "):
+                continue
+            missing = line.split("missing module named ", 1)[1].split(" - ", 1)[0].strip()
+            if self._resolvable(missing):
                 continue
             importers = line.split(" - imported by ", 1)[-1].split(", ")
             for importer in importers:

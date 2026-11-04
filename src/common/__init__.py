@@ -1,4 +1,5 @@
-"""Shared libraries for every app in the monorepo, stdlib-only.
+"""Shared libraries for every app in the monorepo, stdlib-only —
+except ``common.db``, which needs SQLAlchemy.
 
 Subpackages:
 
@@ -7,6 +8,8 @@ Subpackages:
 - ``common.config`` — validated JSON config (``Config``,
   ``ConfigError``, ``load_json``, ``check_required``,
   ``resolve_secret``, ``redact``).
+- ``common.db`` — SQLAlchemy setup shared by apps (``Base``,
+  ``Database``, ``create_engine_for``). Needs SQLAlchemy.
 - ``common.logging`` — the shared static logger (``log``) plus ``setup_logging``.
 - ``common.mail`` — SMTP mail client (``MailClient``, ``MailConfig``).
 - ``common.utils`` — paths, config, JSON, and small utilities

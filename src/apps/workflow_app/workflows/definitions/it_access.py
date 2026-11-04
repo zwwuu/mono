@@ -1,4 +1,9 @@
-from app.workflows.base import WorkflowDefinition, WorkflowStepDef, FormField, WorkflowRole
+from apps.workflow_app.workflows.base import (
+    FormField,
+    WorkflowDefinition,
+    WorkflowRole,
+    WorkflowStepDef,
+)
 
 IT_ACCESS_WORKFLOW = WorkflowDefinition(
     type_id="it_access_request",

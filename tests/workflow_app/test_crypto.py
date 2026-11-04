@@ -1,13 +1,5 @@
-import os
-import pytest
-from app.utils.crypto import (
-    generate_key,
-    encrypt_value,
-    decrypt_value,
-    is_encrypted,
-    get_encryption_key
-)
-from app.config import Settings
+from apps.workflow_app.config import Settings
+from apps.workflow_app.utils.crypto import decrypt_value, encrypt_value, generate_key, is_encrypted
 
 
 def test_key_generation():

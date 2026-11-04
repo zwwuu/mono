@@ -1,15 +1,10 @@
-import sys
-from pathlib import Path
-
-# Add project root to sys.path
-sys.path.insert(0, str(Path(__file__).parent.parent))
-
 import pytest
 from starlette.testclient import TestClient
-from main import app
-from app.services.mail_service import DEV_MAILBOX
-from app.database import SessionLocal, init_db
-from app.models.workflow import WorkflowInstance
+
+from apps.workflow_app.database import SessionLocal, init_db
+from apps.workflow_app.main import app
+from apps.workflow_app.models.workflow import WorkflowInstance
+from apps.workflow_app.services.mail_service import DEV_MAILBOX
 
 
 @pytest.fixture(scope="session", autouse=True)

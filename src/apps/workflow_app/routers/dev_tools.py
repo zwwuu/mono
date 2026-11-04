@@ -1,18 +1,20 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, Request, status, HTTPException
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.config import settings
-from app.models.user import User
-from app.services.auth_service import AuthService, DEMO_USERS
-from app.services.mail_service import DEV_MAILBOX
-from app.dependencies import require_user, get_current_user
+from apps.workflow_app.config import settings
+from apps.workflow_app.database import get_db
+from apps.workflow_app.dependencies import get_current_user
+from apps.workflow_app.models.user import User
+from apps.workflow_app.paths import app_dir
+from apps.workflow_app.services.auth_service import DEMO_USERS, AuthService
+from apps.workflow_app.services.mail_service import DEV_MAILBOX
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=str(app_dir() / "templates"))
 
 
 @router.get("/dev/mailbox", response_class=HTMLResponse)

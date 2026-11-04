@@ -1,4 +1,10 @@
-from app.workflows.base import WorkflowDefinition, WorkflowStepDef, FormField, ReminderConfig, WorkflowRole
+from apps.workflow_app.workflows.base import (
+    FormField,
+    ReminderConfig,
+    WorkflowDefinition,
+    WorkflowRole,
+    WorkflowStepDef,
+)
 
 REMOTE_VPN_WORKFLOW = WorkflowDefinition(
     type_id="remote_vpn_request",

@@ -13,22 +13,23 @@ GET  /api/scheduled-tasks           — JSON list (for programmatic access)
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request, Form, HTTPException
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.orm import Session
 
-from app.config import settings
-from app.database import get_db
-from app.dependencies import require_roles
-from app.models.workflow import ScheduledTask
-from app.models.user import User
-from app.services.scheduler_service import SchedulerService
+from apps.workflow_app.config import settings
+from apps.workflow_app.database import get_db
+from apps.workflow_app.dependencies import require_roles
+from apps.workflow_app.models.user import User
+from apps.workflow_app.models.workflow import ScheduledTask
+from apps.workflow_app.paths import app_dir
+from apps.workflow_app.services.scheduler_service import SchedulerService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=str(app_dir() / "templates"))
 
 
 @router.get("/admin/scheduled-tasks", name="admin_scheduled_tasks")
@@ -43,11 +44,11 @@ def list_scheduled_tasks(
     query = db.query(ScheduledTask).order_by(desc(ScheduledTask.created_at))
 
     if status_filter == "pending":
-        query = query.filter(ScheduledTask.is_fired == False, ScheduledTask.is_cancelled == False)  # noqa: E712
+        query = query.filter(ScheduledTask.is_fired == False, ScheduledTask.is_cancelled == False)
     elif status_filter == "fired":
-        query = query.filter(ScheduledTask.is_fired == True)  # noqa: E712
+        query = query.filter(ScheduledTask.is_fired == True)
     elif status_filter == "cancelled":
-        query = query.filter(ScheduledTask.is_cancelled == True)  # noqa: E712
+        query = query.filter(ScheduledTask.is_cancelled == True)
 
     if workflow_code:
         query = query.filter(ScheduledTask.workflow_tracking_code.ilike(f"%{workflow_code}%"))
@@ -72,7 +73,7 @@ def list_scheduled_tasks(
             "workflow_code": workflow_code or "",
             "scheduler_running": SchedulerService.is_running(),
             "pending_count": db.query(ScheduledTask).filter(
-                ScheduledTask.is_fired == False, ScheduledTask.is_cancelled == False  # noqa: E712
+                ScheduledTask.is_fired == False, ScheduledTask.is_cancelled == False
             ).count(),
             "message": message,
             "message_type": message_type,

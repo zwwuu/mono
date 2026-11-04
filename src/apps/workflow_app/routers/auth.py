@@ -1,15 +1,17 @@
 from typing import Optional
+
 from fastapi import APIRouter, Depends, Form, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.config import settings
-from app.services.auth_service import AuthService
+from apps.workflow_app.config import settings
+from apps.workflow_app.database import get_db
+from apps.workflow_app.paths import app_dir
+from apps.workflow_app.services.auth_service import AuthService
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=str(app_dir() / "templates"))
 
 
 @router.get("/login", response_class=HTMLResponse)

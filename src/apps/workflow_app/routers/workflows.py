@@ -1,21 +1,23 @@
 from datetime import datetime, timezone
 from typing import Optional
-from fastapi import APIRouter, Depends, Form, Request, HTTPException, status
+
+from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.config import settings
-from app.models.user import User
-from app.models.workflow import WorkflowInstance, WorkflowStepHistory, AuditLog
-from app.dependencies import require_user
-from app.services.workflow_engine import WorkflowEngine, WORKFLOW_REGISTRY
-from app.services.mail_service import EmailService
-from app.services.scheduler_service import SchedulerService
+from apps.workflow_app.config import settings
+from apps.workflow_app.database import get_db
+from apps.workflow_app.dependencies import require_user
+from apps.workflow_app.models.user import User
+from apps.workflow_app.models.workflow import AuditLog, WorkflowInstance, WorkflowStepHistory
+from apps.workflow_app.paths import app_dir
+from apps.workflow_app.services.mail_service import EmailService
+from apps.workflow_app.services.scheduler_service import SchedulerService
+from apps.workflow_app.services.workflow_engine import WorkflowEngine
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
+templates = Jinja2Templates(directory=str(app_dir() / "templates"))
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -69,7 +71,7 @@ async def dashboard(
     )
 
 
-from app.services.workflow_engine import WorkflowEngine, WorkflowRegistry
+from apps.workflow_app.services.workflow_engine import WorkflowEngine, WorkflowRegistry
 
 
 @router.get("/workflows/new", response_class=HTMLResponse)

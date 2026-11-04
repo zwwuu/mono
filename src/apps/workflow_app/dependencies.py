@@ -1,12 +1,12 @@
-from typing import Optional, List
-from fastapi import Depends, HTTPException, status
-from starlette.requests import Request
-from starlette.responses import RedirectResponse
-from sqlalchemy.orm import Session
+from typing import List, Optional
 
-from app.database import get_db
-from app.models.user import User
-from app.services.auth_service import AuthService
+from fastapi import Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from starlette.requests import Request
+
+from apps.workflow_app.database import get_db
+from apps.workflow_app.models.user import User
+from apps.workflow_app.services.auth_service import AuthService
 
 
 class RedirectException(Exception):

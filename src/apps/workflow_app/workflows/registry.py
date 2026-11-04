@@ -1,5 +1,6 @@
 from typing import Dict, List, Optional
-from app.workflows.base import WorkflowDefinition
+
+from apps.workflow_app.workflows.base import WorkflowDefinition
 
 
 class WorkflowRegistry:

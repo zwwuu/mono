@@ -1,5 +1,9 @@
-from app.schemas.user import UserBase, UserRead
-from app.schemas.workflow import WorkflowCreateRequest, WorkflowStepActionRequest, WorkflowResponse
+from apps.workflow_app.schemas.user import UserBase, UserRead
+from apps.workflow_app.schemas.workflow import (
+    WorkflowCreateRequest,
+    WorkflowResponse,
+    WorkflowStepActionRequest,
+)
 
 __all__ = [
     "UserBase",

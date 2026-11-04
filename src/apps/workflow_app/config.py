@@ -1,9 +1,11 @@
-from typing import Optional, Any, Dict
-from pydantic import model_validator
-from app.utils.crypto import decrypt_value, is_encrypted
+from typing import Any, Optional
+
+from pydantic import BaseModel, model_validator
+
+from apps.workflow_app.utils.crypto import decrypt_value, is_encrypted
 
 
-class Settings():
+class Settings(BaseModel):
     # General App Settings
     APP_NAME: str = "Workflow Portal"
     APP_ENV: str = "development"
