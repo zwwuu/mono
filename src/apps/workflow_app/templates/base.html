@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Workflow Management Portal{% endblock %} - {{ settings.APP_NAME }}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    {% block extra_head %}{% endblock %}
+</head>
+<body>
+    <!-- Top Navigation -->
+    <header class="navbar">
+        <a href="/dashboard" class="nav-brand">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <polygon points="12 2 2 7 12 12 22 7 12 2"><polygon>
+                <polyline points="2 17 12 22 22 17"></polyline>
+                <polyline points="2 12 12 17 22 12"></polyline>
+            </svg>
+            <span>{{ settings.APP_NAME }}</span>
+            <span class="brand-badge">Enterprise</span>
+        </a>
+
+        {% if current_user %}
+        <nav class="nav-links">
+            <a href="/dashboard" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}">
+                Dashboard
+            </a>
+            <a href="/workflows/new" class="nav-link {% if active_nav == 'new' %}active{% endif %}">
+                + New Request
+            </a>
+            {% if current_user.role in ["admin", "approver"] %}
+            <a href="/admin/scheduled-tasks" class="nav-link {% if active_nav == 'scheduled_tasks' %}active{% endif %}">
+                ⏰ Reminders
+            </a>
+            {% endif %}
+            {% if settings.LDAP_MOCK_ENABLED or not settings.MAIL_ENABLED %}
+            <a href="/dev/mailbox" class="nav-link {% if active_nav == 'mailbox' %}active{% endif %}">
+                Mailbox Log
+            </a>
+            {% endif %}
+        </nav>
+
+        <div class="nav-user">
+            <div class="user-badge">
+                <span>{{ current_user.display_name }}</span>
+                <span class="role-tag">{{ current_user.role }}</span>
+                {%- set extra_roles = current_user.roles | reject("equalto", current_user.role) | list %}
+                {%- if extra_roles %}
+                <span class="role-tag" style="background: #7c3aed; font-size: 0.6rem; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ extra_roles | join(', ') }}">
+                    +{{ extra_roles | join(', ') }}
+                </span>
+                {%- endif %}
+            </div>
+            <a href="/logout" class="btn-logout">Sign Out</a>
+        </div>
+        {% else %}
+        <div class="nav-user">
+            <a href="/login" class="nav-link">Sign In</a>
+        </div>
+        {% endif %}
+    </header>
+
+    {% if settings.LDAP_MOCK_ENABLED and current_user %}
+    <!-- Dev Helper: Instant Role Switcher -->
+    <div class="dev-banner">
+        <div>
+            <strong>Demo Dev Mode Active:</strong> Easily switch simulated LDAP user to test multi-person handoff:
+        </div>
+        <div class="dev-switch-roles">
+            <a href="/dev/switch-user?user=requester" class="role-pill-btn">Requester (Alice)</a>
+            <a href="/dev/switch-user?user=reviewer" class="role-pill-btn" title="procurement_specialist, network_admin, security_officer, finance_auditor, finance_controller">Bob — Reviewer + Specialist Roles</a>
+            <a href="/dev/switch-user?user=approver" class="role-pill-btn" title="dept_head, system_owner, finance_director, executive_approver, capex_lead">Carol — Approver + Exec Roles</a>
+            <a href="/dev/switch-user?user=admin" class="role-pill-btn">Admin (Dave)</a>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Flash Messages Container -->
+    {% if message %}
+    <div class="container" style="padding-bottom: 0;">
+        <div class="alert alert-{{ message_type or 'info' }}">
+            <span>{{ message }}</span>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Main View Content -->
+    <main class="container">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div>{{ settings.APP_NAME }} &bull; Human-Interactive Workflow & Approval Platform &bull; Built with FastAPI & SQLAlchemy</div>
+    </footer>
+
+    <script src="/static/js/main.js"></script>
+    {% block extra_scripts %}{% endblock %}
+</body>
+</html>

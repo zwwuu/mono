@@ -1,0 +1,193 @@
+{% extends "base.html" %}
+
+{% block title %}Executive Sign-off: {{ workflow.tracking_code }}{% endblock %}
+
+{% block content %}
+<div style="max-width: 860px; margin: 0 auto;">
+    <div style="margin-bottom: 1.5rem;">
+        <a href="/workflows/{{ workflow.id }}" style="font-size: 0.875rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 0.3rem;">
+            &larr; Back to Workflow Overview
+        </a>
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-top: 0.5rem;">
+            <span style="font-family: monospace; font-size: 1rem; font-weight: 700; color: var(--primary);">
+                {{ workflow.tracking_code }}
+            </span>
+            <span class="status-badge status-pending_approval">
+                Pending Approval
+            </span>
+            {% if definition %}
+            <span class="role-tag" style="background: #6366f1;">
+                {{ definition.title }}
+            </span>
+            {% endif %}
+        </div>
+        <h1 style="font-size: 1.75rem; font-weight: 800; margin-top: 0.25rem;">
+            Executive Review & Formal Approval
+        </h1>
+        <p style="color: var(--text-muted); font-size: 0.95rem;">
+            Perform executive verification, confirmation, and record your binding sign-off decision.
+        </p>
+    </div>
+
+    <!-- Generic Consolidated Verification Summary -->
+    <div class="card">
+        <div class="card-header">
+            <div class="card-title">Verification Checklist & Workflow Dossier</div>
+            <span class="role-tag" style="background: #10b981;">Ready for Decision</span>
+        </div>
+
+        <div style="margin-bottom: 1.5rem; background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 1rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Request Summary</div>
+                <div style="font-size: 1.1rem; font-weight: 700; color: var(--text-main);">{{ workflow.title }}</div>
+            </div>
+            <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Requester</div>
+                <div style="font-size: 0.95rem; font-weight: 600;">{{ workflow.requester.display_name }} ({{ workflow.requester.department }})</div>
+            </div>
+            <div>
+                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Submitted Date</div>
+                <div style="font-size: 0.95rem;">{{ workflow.created_at.strftime('%b %d, %Y') }}</div>
+            </div>
+        </div>
+
+        <!-- Dynamic Dossier Sections for each completed/active step -->
+        {% if definition %}
+            {% for step_id in definition.step_order %}
+            {% set step = definition.steps.get(step_id) %}
+            {% if step and step.fields and not step.is_approval_step %}
+                
+                {% set ns = namespace(has_data=false) %}
+                {% for f in step.fields %}
+                    {% if workflow.form_data.get(f.name) is not none and workflow.form_data.get(f.name) != '' %}
+                        {% set ns.has_data = true %}
+                    {% endif %}
+                {% endfor %}
+
+                {% if ns.has_data %}
+                <div style="margin-bottom: 1.5rem; padding-bottom: 1.25rem; border-bottom: 1px solid var(--border);">
+                    <div style="font-weight: 700; font-size: 1rem; margin-bottom: 0.75rem; color: var(--text-main); display: flex; align-items: center; gap: 0.5rem;">
+                        <span>{{ step.title }}</span>
+                        <span class="status-badge status-approved" style="font-size: 0.65rem;">Verified</span>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+                        {% for f in step.fields %}
+                        {% set val = workflow.form_data.get(f.name) %}
+                        {% if val is not none and val != '' %}
+                            {% if f.type == 'textarea' %}
+                            <div style="grid-column: 1 / -1;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-bottom: 0.2rem;">
+                                    {{ f.label }}
+                                </div>
+                                <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.65rem 0.85rem; font-size: 0.9rem; white-space: pre-wrap;">{{ val }}</div>
+                            </div>
+                            {% else %}
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">
+                                    {{ f.label }}
+                                </div>
+                                <div style="font-size: 1rem; font-weight: 600; margin-top: 0.2rem;">
+                                    {% if f.type == 'number' and ('price' in f.name or 'amount' in f.name or 'cost' in f.name) %}
+                                        ${{ '{:,.2f}'.format(val|float) }}
+                                    {% else %}
+                                        {{ val }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                </div>
+                {% endif %}
+            {% endif %}
+            {% endfor %}
+        {% endif %}
+    </div>
+
+    <!-- Parallel Approval Context & Prior Signoffs (if multi-approver) -->
+    {% if approval_progress and approval_progress.is_multi_approver %}
+    <div class="card" style="border-left: 4px solid var(--primary); background: #f8fafc; margin-bottom: 1.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem;">
+            <div style="font-weight: 700; font-size: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <span>👥</span> Parallel Approval Sign-off
+            </div>
+            <span style="font-size: 0.8rem; background: #e0e7ff; color: #3730a3; padding: 2px 10px; border-radius: 12px; font-weight: 600;">
+                {{ approval_progress.approvals_received }} of {{ approval_progress.approvals_required }} Sign-offs Completed
+            </span>
+        </div>
+        <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 1rem;">
+            You are signing off as <strong>{{ current_user.display_name }}</strong>
+            {% if definition %}
+                {%- set wf_roles = current_user.workflow_roles.get(definition.type_id, []) %}
+                {%- set acting_role = wf_roles[0] if wf_roles else current_user.role %}
+                (Acting Role: <span class="role-tag" style="font-size: 0.7rem; padding: 1px 6px; background: #6366f1;">{{ acting_role }}</span>
+                {%- if definition.get_role_label(acting_role) != acting_role %}
+                    — {{ definition.get_role_label(acting_role) }}
+                {%- endif %})
+            {% else %}
+                (Role: <span class="role-tag" style="font-size: 0.7rem; padding: 1px 6px;">{{ current_user.role }}</span>)
+            {% endif %}
+            {% if approval_progress.pending_count > 1 %}
+                After your decision, {{ approval_progress.pending_count - 1 }} additional approval(s) will be awaited.
+            {% else %}
+                Your approval will satisfy the final required sign-off for this stage.
+            {% endif %}
+        </p>
+
+        {% if approval_progress.approved_signoffs %}
+        <div style="background: white; border: 1px solid var(--border); border-radius: 6px; padding: 0.85rem;">
+            <div style="font-size: 0.75rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.5rem;">
+                Prior Approver Remarks
+            </div>
+            {% for p in approval_progress.approved_signoffs %}
+            <div style="font-size: 0.85rem; padding: 0.4rem 0; border-bottom: 1px solid #f1f5f9;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <strong style="color: var(--text-main);">{{ p.user_display_name }} ({{ p.user_role }})</strong>
+                    <span style="color: #16a34a; font-weight: 600; font-size: 0.78rem;">✓ Approved</span>
+                </div>
+                {% if p.comment %}
+                <div style="color: var(--text-secondary); font-style: italic; margin-top: 0.2rem; font-size: 0.82rem;">"{{ p.comment }}"</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Formal Approval Action Card -->
+    <div class="card" style="border: 2px solid var(--border-focus);">
+        <h2 class="card-title" style="margin-bottom: 1rem;">Record Your Decision</h2>
+        
+        <form action="/workflows/{{ workflow.id }}/approve" method="POST">
+            <div class="form-group">
+                <label class="form-label" for="decision_comment">
+                    Executive Decision Notes / Official Remarks <span class="required">*</span>
+                </label>
+                <textarea id="decision_comment" name="comment" rows="3" class="form-control" placeholder="State reasons for approval, conditions attached, or rationale if requesting changes/rejection..." required></textarea>
+                <div class="form-help">This comment will be permanently recorded in the audit trail and dispatched in email notifications.</div>
+            </div>
+
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid var(--border);">
+                <a href="/workflows/{{ workflow.id }}" class="btn btn-outline">Cancel</a>
+
+                <div style="display: flex; gap: 0.75rem;">
+                    <button type="submit" name="action" value="REJECT" class="btn btn-danger" data-confirm="Are you sure you want to REJECT this workflow request? This action cannot be undone.">
+                        Reject Request
+                    </button>
+
+                    <button type="submit" name="action" value="REQUEST_CHANGES" class="btn btn-outline" style="border-color: var(--warning); color: var(--warning-text);">
+                        Request Revision
+                    </button>
+
+                    <button type="submit" name="action" value="APPROVE" class="btn btn-success" style="padding: 0.65rem 1.75rem; font-size: 1rem;">
+                        &#10003; Approve & Confirm Request
+                    </button>
+                </div>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

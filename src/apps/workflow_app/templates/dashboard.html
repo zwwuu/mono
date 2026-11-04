@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.75rem;">
+    <div>
+        <h1 style="font-size: 1.75rem; font-weight: 800; color: var(--text-main);">Workflow Dashboard</h1>
+        <p style="color: var(--text-muted); font-size: 0.95rem;">
+            Welcome back, <strong>{{ current_user.display_name }}</strong> ({{ current_user.role|capitalize }} - {{ current_user.department }})
+        </p>
+    </div>
+    <a href="/workflows/new" class="btn btn-primary" style="padding: 0.65rem 1.25rem;">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="12" y1="5" x2="12" y2="19"></line>
+            <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New Request
+    </a>
+</div>
+
+<!-- Metrics Overview -->
+<div class="metrics-grid">
+    <div class="metric-card">
+        <div class="metric-title">Action Required By You</div>
+        <div class="metric-value" style="color: var(--primary);">{{ metrics.pending_my_action }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">In Progress / Review</div>
+        <div class="metric-value" style="color: var(--warning);">{{ metrics.in_progress }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Approved & Confirmed</div>
+        <div class="metric-value" style="color: var(--success);">{{ metrics.approved }}</div>
+    </div>
+    <div class="metric-card">
+        <div class="metric-title">Total Workflows</div>
+        <div class="metric-value">{{ metrics.total }}</div>
+    </div>
+</div>
+
+<!-- Workflows Data Table -->
+<div class="card">
+    <div class="card-header">
+        <div class="card-title">All Active & Historic Workflows</div>
+        <div style="display: flex; gap: 0.5rem;">
+            <a href="/dashboard" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">All</a>
+            <a href="/dashboard?filter=my_action" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Needs My Action</a>
+            <a href="/dashboard?filter=my_requests" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">Created by Me</a>
+        </div>
+    </div>
+
+    {% if workflows %}
+    <div class="table-container">
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Tracking Code</th>
+                    <th>Title & Type</th>
+                    <th>Requester</th>
+                    <th>Current Stage</th>
+                    <th>Status</th>
+                    <th>Assigned To</th>
+                    <th>Created</th>
+                    <th style="text-align: right;">Action</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for wf in workflows %}
+                {% set can_act = can_user_act_func(wf, current_user) %}
+                <tr {% if can_act %}style="background-color: #fdfefe;"{% endif %}>
+                    <td>
+                        <a href="/workflows/{{ wf.id }}" style="font-weight: 700; font-family: monospace; font-size: 0.95rem;">
+                            {{ wf.tracking_code }}
+                        </a>
+                    </td>
+                    <td>
+                        <div style="font-weight: 600;">{{ wf.title }}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted); text-transform: capitalize;">
+                            {{ wf.workflow_type.replace('_', ' ') }}
+                        </div>
+                    </td>
+                    <td>
+                        <div>{{ wf.requester.display_name }}</div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">{{ wf.requester.department }}</div>
+                    </td>
+                    <td>
+                        <span style="font-size: 0.825rem; font-weight: 600; color: #475569;">
+                            {{ wf.current_step.replace('_', ' ').title() }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="status-badge status-{{ wf.status.lower() }}">
+                            {{ wf.status }}
+                        </span>
+                    </td>
+                    <td>
+                        <span class="role-tag" style="background: #64748b;">
+                            {{ wf.assigned_role }}
+                        </span>
+                    </td>
+                    <td style="font-size: 0.8rem; color: var(--text-muted);">
+                        {{ wf.created_at.strftime('%Y-%m-%d %H:%M') }}
+                    </td>
+                    <td style="text-align: right;">
+                        {% if can_act %}
+                            {% if wf.current_step == 'step_4_approval' %}
+                                <a href="/workflows/{{ wf.id }}/approve" class="btn btn-success" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                                    Sign-off / Approve
+                                </a>
+                            {% else %}
+                                <a href="/workflows/{{ wf.id }}/edit-step" class="btn btn-primary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                                    Process Task
+                                </a>
+                            {% endif %}
+                        {% else %}
+                            <a href="/workflows/{{ wf.id }}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;">
+                                View Details
+                            </a>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-bottom: 1rem; color: var(--text-light);">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+            <polyline points="14 2 14 8 20 8"></polyline>
+            <line x1="16" y1="13" x2="8" y2="13"></line>
+            <line x1="16" y1="17" x2="8" y2="17"></line>
+            <polyline points="10 9 9 9 8 9"></polyline>
+        </svg>
+        <p style="font-size: 1.1rem; font-weight: 600;">No workflows found</p>
+        <p style="font-size: 0.875rem; margin-top: 0.25rem;">Get started by submitting a new interactive workflow request.</p>
+        <a href="/workflows/new" class="btn btn-primary" style="margin-top: 1rem;">
+            Create Your First Request
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

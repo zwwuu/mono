@@ -16,7 +16,6 @@ dependencies = [
     "pydantic>=2.14.2",
     "requests>=2.34.2",
     "sqlalchemy>=2.0.57",
-    "uvicorn>=0.54.0",
     "pytest-playwright>=0.10.0",
     "smbprotocol>=1.17.0",
     "pytest>=9.2.0",
@@ -24,6 +23,12 @@ dependencies = [
     "pypdf>=6.21.4",
     "pyinstaller>=6.22.3",
     "reportlab>=5.1.0",
+   "uvicorn[standard]>=0.54.0",
+   "pymysql>=1.2.3",
+   "ldap3>=2.9.1",
+   "apscheduler>=3.11.3",
+   "cryptography>=50.0.2",
+   "starlette[full]>=1.7.0"
 ]
 
 # One console command per app: `app-one` etc. after install.

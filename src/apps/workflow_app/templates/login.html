@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+
+{% block title %}Sign In{% endblock %}
+
+{% block content %}
+<div style="max-width: 480px; margin: 3rem auto;">
+    <div class="card" style="box-shadow: var(--shadow-lg);">
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="width: 52px; height: 52px; background: var(--primary-light); color: var(--primary); border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 0.75rem;">
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"></path>
+                </svg>
+            </div>
+            <h2 class="card-title" style="font-size: 1.5rem;">Sign In to Workflow Portal</h2>
+            <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.25rem;">
+                Authenticate with your corporate LDAP credentials
+            </p>
+        </div>
+
+        {% if error %}
+        <div class="alert alert-error">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form action="/login" method="POST">
+            {% if next_url %}
+            <input type="hidden" name="next_url" value="{{ next_url }}">
+            {% endif %}
+
+            <div class="form-group">
+                <label class="form-label" for="username">LDAP Username <span class="required">*</span></label>
+                <input type="text" id="username" name="username" class="form-control" placeholder="e.g. jdoe or requester" required autofocus>
+            </div>
+
+            <div class="form-group">
+                <label class="form-label" for="password">Password <span class="required">*</span></label>
+                <input type="password" id="password" name="password" class="form-control" placeholder="Enter your domain password" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary" style="width: 100%; padding: 0.75rem; font-size: 1rem; margin-top: 0.5rem;">
+                Sign In via LDAP
+            </button>
+        </form>
+
+        {% if settings.LDAP_MOCK_ENABLED %}
+        <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px dashed var(--border);">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.75rem;">
+                <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">
+                    1-Click Demo Accounts
+                </span>
+                <span class="role-tag" style="background: #3b82f6;">Dev Mode</span>
+            </div>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                Click any role to log in instantly and test multi-person workflow handoffs:
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem;">
+                <a href="/dev/switch-user?user=requester{% if next_url %}&next={{ next_url }}{% endif %}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem;">
+                    Requester (Alice)
+                </a>
+                <a href="/dev/switch-user?user=reviewer{% if next_url %}&next={{ next_url }}{% endif %}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem;">
+                    Reviewer (Bob)
+                </a>
+                <a href="/dev/switch-user?user=approver{% if next_url %}&next={{ next_url }}{% endif %}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem;">
+                    Approver (Carol)
+                </a>
+                <a href="/dev/switch-user?user=admin{% if next_url %}&next={{ next_url }}{% endif %}" class="btn btn-outline" style="font-size: 0.8rem; padding: 0.4rem;">
+                    Admin (Dave)
+                </a>
+            </div>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

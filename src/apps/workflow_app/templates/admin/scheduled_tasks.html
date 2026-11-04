@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+
+{% block title %}Scheduled Tasks — Admin{% endblock %}
+
+{% block content %}
+<div style="max-width: 1200px; margin: 0 auto; padding: 0 1rem;">
+
+  <!-- Page Header -->
+  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 1.75rem; flex-wrap: wrap; gap: 1rem;">
+    <div>
+      <h1 style="font-size: 1.6rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.6rem;">
+        <span style="font-size: 1.4rem;">⏰</span> Scheduled Reminders &amp; Escalations
+      </h1>
+      <p style="color: var(--text-secondary); margin: 0.3rem 0 0;">
+        Manage background reminder jobs attached to workflow steps.
+        {% if scheduler_running %}
+          <span style="background: #dcfce7; color: #166534; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; font-weight: 600; margin-left: 6px;">● Scheduler Running</span>
+        {% else %}
+          <span style="background: #fee2e2; color: #991b1b; font-size: 0.75rem; padding: 2px 8px; border-radius: 12px; font-weight: 600; margin-left: 6px;">● Scheduler Stopped</span>
+        {% endif %}
+      </p>
+    </div>
+    <div style="display: flex; align-items: center; gap: 0.75rem;">
+      <span style="background: #fef3c7; color: #92400e; font-size: 0.82rem; padding: 4px 12px; border-radius: 20px; font-weight: 600;">
+        {{ pending_count }} Pending
+      </span>
+      <a href="/dashboard" class="btn btn-outline" style="font-size: 0.85rem;">← Back to Dashboard</a>
+    </div>
+  </div>
+
+  <!-- Flash messages -->
+  {% if message %}
+  <div class="alert alert-{{ message_type or 'success' }}" style="margin-bottom: 1rem;">
+    {{ message }}
+  </div>
+  {% endif %}
+
+  <!-- Filters -->
+  <div class="card" style="margin-bottom: 1.5rem; padding: 1rem 1.5rem;">
+    <form method="get" action="/admin/scheduled-tasks" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+      <div style="flex: 1; min-width: 200px;">
+        <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.05em;">Status Filter</label>
+        <select name="status_filter" class="form-control" style="padding: 0.5rem 0.75rem;">
+          <option value="all" {% if status_filter == "all" %}selected{% endif %}>All Tasks</option>
+          <option value="pending" {% if status_filter == "pending" %}selected{% endif %}>⏳ Pending</option>
+          <option value="fired" {% if status_filter == "fired" %}selected{% endif %}>✅ Fired</option>
+          <option value="cancelled" {% if status_filter == "cancelled" %}selected{% endif %}>❌ Cancelled</option>
+        </select>
+      </div>
+      <div style="flex: 1; min-width: 200px;">
+        <label style="font-size: 0.78rem; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 0.3rem; text-transform: uppercase; letter-spacing: 0.05em;">Workflow Tracking Code</label>
+        <input type="text" name="workflow_code" value="{{ workflow_code }}" class="form-control" placeholder="e.g. WF-20241015-0001" style="padding: 0.5rem 0.75rem;">
+      </div>
+      <div>
+        <button type="submit" class="btn btn-primary" style="padding: 0.55rem 1.25rem;">Filter</button>
+        <a href="/admin/scheduled-tasks" class="btn btn-outline" style="padding: 0.55rem 1rem; margin-left: 0.4rem;">Clear</a>
+      </div>
+    </form>
+  </div>
+
+  <!-- Tasks Table -->
+  <div class="card" style="overflow: hidden; padding: 0;">
+    {% if tasks %}
+    <div style="overflow-x: auto;">
+      <table style="width: 100%; border-collapse: collapse; font-size: 0.875rem;">
+        <thead>
+          <tr style="background: var(--surface-secondary); border-bottom: 2px solid var(--border-color);">
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;">Workflow</th>
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Type</th>
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Description</th>
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Recipient</th>
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;">Scheduled (UTC)</th>
+            <th style="padding: 0.75rem 1rem; text-align: left; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Status</th>
+            <th style="padding: 0.75rem 1rem; text-align: center; font-weight: 600; color: var(--text-secondary); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em;">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for task in tasks %}
+          <tr style="border-bottom: 1px solid var(--border-color); transition: background 0.15s;"
+              onmouseover="this.style.background='var(--surface-secondary)'"
+              onmouseout="this.style.background='transparent'">
+
+            <!-- Workflow -->
+            <td style="padding: 0.75rem 1rem; white-space: nowrap;">
+              <a href="/workflows/{{ task.workflow_id }}" style="font-weight: 600; color: var(--primary); text-decoration: none; font-family: monospace; font-size: 0.85rem;">
+                {{ task.workflow_tracking_code }}
+              </a>
+            </td>
+
+            <!-- Type -->
+            <td style="padding: 0.75rem 1rem;">
+              {% if task.task_type == "escalation" %}
+                <span style="background: #fee2e2; color: #991b1b; font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; font-weight: 700; text-transform: uppercase;">🔺 Escalation</span>
+              {% else %}
+                <span style="background: #e0e7ff; color: #3730a3; font-size: 0.72rem; padding: 2px 8px; border-radius: 12px; font-weight: 700; text-transform: uppercase;">⏰ Reminder</span>
+              {% endif %}
+            </td>
+
+            <!-- Description -->
+            <td style="padding: 0.75rem 1rem; max-width: 300px;">
+              <span title="{{ task.description }}" style="display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ task.description or "—" }}</span>
+            </td>
+
+            <!-- Recipient Role -->
+            <td style="padding: 0.75rem 1rem;">
+              <span style="background: var(--surface-secondary); padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 500;">{{ task.recipient_role or "assigned" }}</span>
+            </td>
+
+            <!-- Scheduled time -->
+            <td style="padding: 0.75rem 1rem; white-space: nowrap; font-family: monospace; font-size: 0.8rem; color: var(--text-secondary);">
+              {% if task.run_at %}
+                {{ task.run_at.strftime("%Y-%m-%d %H:%M") }}
+                {% if task.delay_seconds %}
+                  <br><span style="font-size: 0.72rem; color: var(--text-muted);">+{{ (task.delay_seconds // 3600) }}h delay</span>
+                {% endif %}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+
+            <!-- Status badge -->
+            <td style="padding: 0.75rem 1rem; white-space: nowrap;">
+              {% if task.is_cancelled %}
+                <span style="background: #f1f5f9; color: #64748b; font-size: 0.72rem; padding: 3px 8px; border-radius: 12px; font-weight: 600;">❌ Cancelled</span>
+              {% elif task.is_fired %}
+                <span style="background: #dcfce7; color: #166534; font-size: 0.72rem; padding: 3px 8px; border-radius: 12px; font-weight: 600;">✅ Fired</span>
+                {% if task.fired_at %}
+                  <br><span style="font-family: monospace; font-size: 0.7rem; color: var(--text-muted);">{{ task.fired_at.strftime("%H:%M UTC") }}</span>
+                {% endif %}
+              {% else %}
+                <span style="background: #fef3c7; color: #92400e; font-size: 0.72rem; padding: 3px 8px; border-radius: 12px; font-weight: 600;">⏳ Pending</span>
+              {% endif %}
+            </td>
+
+            <!-- Actions -->
+            <td style="padding: 0.75rem 1rem; text-align: center;">
+              {% if not task.is_fired and not task.is_cancelled %}
+                <form method="post" action="/admin/scheduled-tasks/{{ task.job_id }}/cancel"
+                      onsubmit="return confirm('Cancel this scheduled reminder?');"
+                      style="display: inline;">
+                  <button type="submit" style="background: none; border: 1px solid #ef4444; color: #ef4444; font-size: 0.75rem; padding: 3px 10px; border-radius: 6px; cursor: pointer; font-weight: 600; transition: all 0.15s;"
+                          onmouseover="this.style.background='#ef4444';this.style.color='white'"
+                          onmouseout="this.style.background='none';this.style.color='#ef4444'">
+                    Cancel
+                  </button>
+                </form>
+              {% else %}
+                <span style="color: var(--text-muted); font-size: 0.8rem;">—</span>
+              {% endif %}
+            </td>
+
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div style="padding: 3rem; text-align: center; color: var(--text-secondary);">
+      <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">📭</div>
+      <h3 style="font-weight: 600; margin-bottom: 0.5rem;">No scheduled tasks found</h3>
+      <p style="font-size: 0.9rem;">
+        Scheduled reminders appear here once a workflow transitions to a step that has
+        <code>reminders</code> configured in its <code>WorkflowStepDef</code>.
+      </p>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Info box: how it works -->
+  <div class="card" style="margin-top: 1.5rem; padding: 1.25rem 1.5rem; background: var(--surface-secondary); border: 1px dashed var(--border-color);">
+    <h4 style="margin: 0 0 0.6rem; font-size: 0.9rem; font-weight: 700; color: var(--text-secondary);">ℹ️ How Scheduling Works</h4>
+    <ul style="margin: 0; padding-left: 1.3rem; color: var(--text-secondary); font-size: 0.85rem; line-height: 1.75;">
+      <li>Add <strong>ReminderConfig</strong> entries to any <code>WorkflowStepDef</code> in the workflow definition files.</li>
+      <li>When a workflow transitions <em>into</em> that step, reminders are automatically registered with APScheduler.</li>
+      <li>When the step is exited (step action taken), pending reminders for that step are <strong>automatically cancelled</strong>.</li>
+      <li>Reminders can use <code>delay_seconds</code> (relative to step entry) or <code>run_at_iso</code> (absolute UTC time).</li>
+      <li>Fired reminders send emails via the Mail Service; in dev mode they appear in the <a href="/dev/mailbox">Dev Mailbox</a>.</li>
+    </ul>
+  </div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,324 @@
+{% extends "base.html" %}
+
+{% block title %}{{ workflow.tracking_code }} - {{ workflow.title }}{% endblock %}
+
+{% block content %}
+<div>
+    <!-- Breadcrumb & Top Bar -->
+    <div style="margin-bottom: 1rem;">
+        <a href="/dashboard" style="font-size: 0.875rem; color: var(--text-muted); display: inline-flex; align-items: center; gap: 0.3rem;">
+            &larr; Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Header Card -->
+    <div class="card" style="margin-bottom: 2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 1rem;">
+            <div>
+                <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 0.5rem;">
+                    <span style="font-family: monospace; font-size: 1.1rem; font-weight: 800; color: var(--primary);">
+                        {{ workflow.tracking_code }}
+                    </span>
+                    <span class="status-badge status-{{ workflow.status.lower() }}">
+                        {{ workflow.status }}
+                    </span>
+                    <span class="role-tag" style="background: #475569;">
+                        Assigned: {{ workflow.assigned_role }}
+                    </span>
+                    {% if definition %}
+                    <span class="role-tag" style="background: #6366f1;">
+                        {{ definition.title }}
+                    </span>
+                    {% endif %}
+                </div>
+                <h1 style="font-size: 1.6rem; font-weight: 800; color: var(--text-main); margin-bottom: 0.5rem;">
+                    {{ workflow.title }}
+                </h1>
+                <div style="font-size: 0.875rem; color: var(--text-muted); display: flex; gap: 1.5rem; flex-wrap: wrap;">
+                    <span><strong>Requester:</strong> {{ workflow.requester.display_name }} ({{ workflow.requester.department }})</span>
+                    <span><strong>Submitted:</strong> {{ workflow.created_at.strftime('%b %d, %Y %H:%M') }}</span>
+                    <span><strong>Last Updated:</strong> {{ workflow.updated_at.strftime('%b %d, %Y %H:%M') }}</span>
+                </div>
+            </div>
+
+            <!-- Action Prompt if User has permission to act -->
+            {% if can_act %}
+            {% set current_step_def = definition.get_step(workflow.current_step) if definition else None %}
+            <div style="background: var(--primary-light); border: 1px solid var(--border-focus); border-radius: var(--radius-sm); padding: 1rem; text-align: right;">
+                <div style="font-size: 0.85rem; font-weight: 700; color: var(--primary-text); margin-bottom: 0.5rem;">
+                    Action Required
+                    {% if definition %}
+                        {%- set wf_roles = current_user.workflow_roles.get(definition.type_id, []) %}
+                        {%- set acting_role = wf_roles[0] if wf_roles else current_user.role %}
+                        <span style="font-size: 0.7rem; font-weight: 600; background: #6366f1; color: white; padding: 2px 8px; border-radius: 10px; margin-left: 4px;">
+                            {{ acting_role }}
+                        </span>
+                    {% else %}
+                        by {{ current_user.role|capitalize }}
+                    {% endif %}
+                </div>
+                {% if current_step_def and current_step_def.is_approval_step %}
+                    <a href="/workflows/{{ workflow.id }}/approve" class="btn btn-success">
+                        Sign-off & Approve / Decision &rarr;
+                    </a>
+                {% else %}
+                    <a href="/workflows/{{ workflow.id }}/edit-step" class="btn btn-primary">
+                        Process {{ current_step_def.title.split(':')[-1].strip() if current_step_def else 'Step' }} &rarr;
+                    </a>
+                {% endif %}
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Generic Dynamic Stepper Progress Bar -->
+        {% if stages %}
+        <div class="stepper-container" style="margin-top: 2.5rem;">
+            <div class="stepper-line"></div>
+            {% for stage in stages %}
+            <div class="stepper-step {{ stage.status }}">
+                <div class="stepper-circle">
+                    {% if stage.status == 'completed' %}&#10003;{% else %}{{ loop.index }}{% endif %}
+                </div>
+                <div class="stepper-label">{{ stage.title }}</div>
+            </div>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+
+    <!-- Workflow Feature Roles Info Card -->
+    {% if definition and definition.feature_roles %}
+    <div class="card" style="margin-bottom: 2rem; background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); color: white; border: none;">
+        <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem;">
+            <span style="font-size: 1.1rem;">🔐</span>
+            <span style="font-weight: 700; font-size: 0.95rem;">Workflow Feature Roles</span>
+            <span style="font-size: 0.7rem; background: rgba(255,255,255,0.15); padding: 2px 8px; border-radius: 10px; margin-left: auto;">{{ definition.title }}</span>
+        </div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.75rem;">
+            {% for fr in definition.feature_roles %}
+            {%- set is_mine = current_user.has_role(fr.code, definition.type_id) %}
+            <div style="background: rgba(255,255,255,{% if is_mine %}0.18{% else %}0.07{% endif %}); border-radius: 8px; padding: 0.75rem; border: 1px solid rgba(255,255,255,{% if is_mine %}0.3{% else %}0.1{% endif %});">
+                <div style="display: flex; align-items: center; gap: 0.4rem; margin-bottom: 0.3rem;">
+                    <span style="font-size: 0.78rem; font-weight: 700; background: {% if is_mine %}#10b981{% else %}rgba(255,255,255,0.2){% endif %}; padding: 2px 7px; border-radius: 8px; letter-spacing: 0.02em;">
+                        {{ fr.code }}
+                    </span>
+                    {% if is_mine %}<span style="font-size: 0.7rem; color: #a7f3d0;">✓ You</span>{% endif %}
+                </div>
+                <div style="font-size: 0.82rem; font-weight: 600; opacity: 0.95;">{{ fr.name }}</div>
+                {% if fr.description %}
+                <div style="font-size: 0.72rem; opacity: 0.65; margin-top: 0.2rem; line-height: 1.3;">{{ fr.description }}</div>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Multi-Approver & Parallel Approval Status Banner -->
+    {% if approval_progress and approval_progress.is_multi_approver %}
+    <div class="card" style="margin-bottom: 2rem; border-left: 4px solid var(--primary); background: #f8fafc;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 1rem; margin-bottom: 1rem;">
+            <div>
+                <h3 style="font-size: 1.1rem; font-weight: 700; margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <span>👥</span> Parallel Approval Progress
+                    <span style="font-size: 0.75rem; background: #e0e7ff; color: #3730a3; padding: 2px 8px; border-radius: 12px; font-weight: 600;">
+                        {{ approval_progress.approvals_received }} of {{ approval_progress.approvals_required }} Sign-offs
+                    </span>
+                </h3>
+                <p style="color: var(--text-muted); font-size: 0.85rem; margin: 0.25rem 0 0;">
+                    This step requires concurrent approvals from different roles or designated users before advancing.
+                </p>
+            </div>
+            {% if approval_progress.user_has_approved %}
+            <div style="background: #dcfce7; color: #166534; padding: 0.4rem 0.85rem; border-radius: 6px; font-size: 0.82rem; font-weight: 600; display: flex; align-items: center; gap: 0.4rem;">
+                <span>✓</span> You have recorded your approval for this step
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Progress Bar -->
+        <div style="background: #e2e8f0; height: 10px; border-radius: 5px; overflow: hidden; margin-bottom: 1.25rem;">
+            <div style="background: linear-gradient(90deg, #6366f1, #10b981); height: 100%; width: {{ approval_progress.percent_complete }}%; transition: width 0.3s ease;"></div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem;">
+            <!-- Recorded Sign-offs -->
+            <div style="background: white; border: 1px solid var(--border); border-radius: 6px; padding: 1rem;">
+                <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.75rem;">
+                    Completed Sign-offs ({{ approval_progress.approved_signoffs|length }})
+                </div>
+                {% if approval_progress.approved_signoffs %}
+                    {% for signoff in approval_progress.approved_signoffs %}
+                    <div style="padding: 0.6rem 0; border-bottom: 1px solid #f1f5f9; display: flex; flex-direction: column; gap: 0.25rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <span style="font-weight: 600; font-size: 0.88rem;">{{ signoff.user_display_name }}</span>
+                            <span class="role-tag" style="font-size: 0.7rem; padding: 1px 6px;">{{ signoff.user_role }}</span>
+                        </div>
+                        <div style="font-size: 0.75rem; color: var(--text-muted);">
+                            Approved on {{ signoff.created_at.strftime('%b %d, %Y %H:%M') }}
+                        </div>
+                        {% if signoff.comment %}
+                        <div style="font-size: 0.82rem; color: var(--text-main); font-style: italic; background: #f8fafc; padding: 0.35rem 0.5rem; border-radius: 4px; margin-top: 0.2rem;">
+                            "{{ signoff.comment }}"
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div style="font-size: 0.85rem; color: var(--text-muted); font-style: italic;">
+                        No approvals recorded yet for this step.
+                    </div>
+                {% endif %}
+            </div>
+
+            <!-- Pending Requirements -->
+            <div style="background: white; border: 1px solid var(--border); border-radius: 6px; padding: 1rem;">
+                <div style="font-size: 0.78rem; font-weight: 700; color: var(--text-muted); text-transform: uppercase; margin-bottom: 0.75rem;">
+                    Requirements &amp; Remaining Approvers
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 0.5rem; font-size: 0.85rem;">
+                    {% if approval_progress.role_status %}
+                        {% for r_name, r_info in approval_progress.role_status.items() %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border-radius: 4px; background: {% if r_info.satisfied %}#f0fdf4{% else %}#fffbeb{% endif %};">
+                            <div>
+                                <strong style="text-transform: capitalize;">{{ r_name }} Role</strong>:
+                                <span style="font-size: 0.8rem; color: var(--text-muted);">{{ r_info.received }} of {{ r_info.required }} approved</span>
+                            </div>
+                            {% if r_info.satisfied %}
+                                <span style="color: #16a34a; font-weight: 700; font-size: 0.8rem;">✓ Satisfied</span>
+                            {% else %}
+                                <span style="color: #d97706; font-weight: 600; font-size: 0.8rem;">⏳ Awaiting</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    {% if approval_progress.user_status %}
+                        {% for u_name, u_info in approval_progress.user_status.items() %}
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 0.4rem 0.6rem; border-radius: 4px; background: {% if u_info.approved %}#f0fdf4{% else %}#fffbeb{% endif %};">
+                            <div>
+                                <strong>User: @{{ u_name }}</strong>
+                            </div>
+                            {% if u_info.approved %}
+                                <span style="color: #16a34a; font-weight: 700; font-size: 0.8rem;">✓ Signed Off</span>
+                            {% else %}
+                                <span style="color: #d97706; font-weight: 600; font-size: 0.8rem;">⏳ Pending</span>
+                            {% endif %}
+                        </div>
+                        {% endfor %}
+                    {% endif %}
+
+                    {% if not approval_progress.role_status and not approval_progress.user_status %}
+                        <div style="color: var(--text-muted); font-size: 0.85rem;">
+                            Needs <strong>{{ approval_progress.pending_count }}</strong> more approval(s) from eligible approvers.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Data Display Columns -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 1.5rem;">
+        <div>
+            <!-- Dynamically Rendered Step Field Cards -->
+            {% if definition %}
+                {% for step_id in definition.step_order %}
+                {% set step = definition.steps.get(step_id) %}
+                {% if step and step.fields %}
+                
+                {% set ns = namespace(has_data=false) %}
+                {% for f in step.fields %}
+                    {% if workflow.form_data.get(f.name) is not none and workflow.form_data.get(f.name) != '' %}
+                        {% set ns.has_data = true %}
+                    {% endif %}
+                {% endfor %}
+
+                <div class="card">
+                    <div class="card-header">
+                        <div class="card-title">{{ step.title }}</div>
+                        {% if ns.has_data %}
+                            <span class="status-badge status-approved">Recorded</span>
+                        {% elif workflow.current_step == step.step_id %}
+                            <span class="status-badge status-pending_review">Active Stage</span>
+                        {% else %}
+                            <span class="status-badge status-draft">Pending</span>
+                        {% endif %}
+                    </div>
+
+                    {% if ns.has_data or workflow.current_step == step.step_id %}
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1.25rem;">
+                        {% for f in step.fields %}
+                        {% set val = workflow.form_data.get(f.name) %}
+                        {% if val is not none and val != '' %}
+                            {% if f.type == 'textarea' %}
+                            <div style="grid-column: 1 / -1;">
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase; margin-bottom: 0.25rem;">
+                                    {{ f.label }}
+                                </div>
+                                <div style="background: #f8fafc; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0.75rem; font-size: 0.9rem; white-space: pre-wrap;">{{ val }}</div>
+                            </div>
+                            {% else %}
+                            <div>
+                                <div style="font-size: 0.75rem; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">
+                                    {{ f.label }}
+                                </div>
+                                <div style="font-size: 1rem; font-weight: 600; margin-top: 0.2rem;">
+                                    {% if f.type == 'number' and ('price' in f.name or 'amount' in f.name or 'cost' in f.name) %}
+                                        ${{ '{:,.2f}'.format(val|float) }}
+                                    {% else %}
+                                        {{ val }}
+                                    {% endif %}
+                                </div>
+                            </div>
+                            {% endif %}
+                        {% endif %}
+                        {% endfor %}
+                    </div>
+                    {% else %}
+                    <p style="color: var(--text-muted); font-size: 0.875rem;">
+                        Awaiting data collection in this workflow stage.
+                    </p>
+                    {% endif %}
+                </div>
+                {% endif %}
+                {% endfor %}
+            {% endif %}
+        </div>
+
+        <!-- Sidebar: History & Audit Timeline -->
+        <div>
+            <div class="card">
+                <div class="card-title" style="margin-bottom: 1rem;">Action History & Audit</div>
+                
+                {% if workflow.history %}
+                <div class="timeline">
+                    {% for h in workflow.history %}
+                    <div class="timeline-item">
+                        <div class="timeline-dot">
+                            {% if h.action in ['APPROVE', 'CONFIRM', 'CONFIRM_AND_SUBMIT'] %}&#10003;{% else %}&bull;{% endif %}
+                        </div>
+                        <div class="timeline-content">
+                            <div class="timeline-header">
+                                <span class="timeline-actor">{{ h.actor_name }}</span>
+                                <span class="status-badge status-{{ 'approved' if h.action in ['APPROVE', 'CONFIRM'] else ('rejected' if h.action == 'REJECT' else 'draft') }}" style="font-size: 0.65rem;">
+                                    {{ h.action }}
+                                </span>
+                            </div>
+                            <div class="timeline-date">{{ h.created_at.strftime('%b %d, %Y %H:%M:%S') }}</div>
+                            {% if h.comment %}
+                            <div class="timeline-comment">"{{ h.comment }}"</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <p style="color: var(--text-muted); font-size: 0.85rem;">No history recorded yet.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
