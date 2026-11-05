@@ -6,9 +6,10 @@ the exit code is the result either way. Usage errors exit 2 via
 argparse, matching ExitCode.USAGE.
 """
 
-import argparse
 import logging
 import sys
+
+from common.app_config import AppConfig
 
 from . import APP_NAME, __version__
 from .checker import DEFAULT_FIELDS, FormChecker
@@ -17,12 +18,13 @@ from .exit_codes import ExitCode
 from .matcher import YesMatcher
 
 
-def build_parser():
-    """The argument parser for the CLI."""
-    parser = argparse.ArgumentParser(
-        prog=APP_NAME,
-        description="Check a PDF form: exit 1 when field A1 or A2 is 'yes'.",
-    )
+class PdfCheckConfig(AppConfig):
+    APP_NAME = APP_NAME
+    VERSION = __version__
+    DESCRIPTION = "Check a PDF form: exit 1 when field A1 or A2 is 'yes'."
+
+
+def _extra_args(parser):
     parser.add_argument("pdf", help="path to the PDF form")
     parser.add_argument(
         "--fields",
@@ -36,8 +38,6 @@ def build_parser():
         action="store_true",
         help="print nothing on success; the exit code is the result",
     )
-    parser.add_argument("--version", action="version", version=f"{APP_NAME} {__version__}")
-    return parser
 
 
 def format_result(result, matcher):
@@ -58,7 +58,8 @@ def main(argv=None):
     # pypdf logs parse warnings to stderr; the caller gets one error
     # line from us instead, so silence everything below ERROR here.
     logging.getLogger("pypdf").setLevel(logging.ERROR)
-    args = build_parser().parse_args(argv)
+    cfg = PdfCheckConfig(anchor=__file__, argv=argv, extra_args=_extra_args)
+    args = cfg.args
     matcher = YesMatcher()
     checker = FormChecker(fields=args.fields, matcher=matcher)
     try:

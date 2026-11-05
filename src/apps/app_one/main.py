@@ -6,10 +6,9 @@ module as apps.app_one.main, so the relative imports resolve both
 from source (`python -m apps.app_one`) and in the exe.
 """
 
-from common.cli import build_parser, resolve_log_level
-from common.logging import log, setup_logging
+from common.app_config import AppConfig
 from common.mail import MailClient, MailConfig
-from common.utils import app_file_path, load_app_config, read_app_asset
+from common.utils import load_app_config
 
 from . import APP_NAME, __version__
 from .report import build_report
@@ -20,37 +19,56 @@ DEFAULT_CONFIG = {
     "greeting": "Hello",
 }
 
+FALLBACK_TEMPLATE = "$greeting,\n\n$app report for $date.\n"
 
-def main(argv=None):
-    parser = build_parser(
-        APP_NAME, "Build a report and email it.", __version__, with_dry_run=True
-    )
+
+class AppOneConfig(AppConfig):
+    APP_NAME = APP_NAME
+    VERSION = __version__
+    DESCRIPTION = "Build a report and email it."
+
+
+def _extra_args(parser):
     parser.add_argument(
         "--config-dir", default=None, help="directory holding config.json (overrides)"
     )
-    args = parser.parse_args(argv)
 
-    setup_logging(level=resolve_log_level(args))
 
-    search_dirs = [args.config_dir] if args.config_dir else None
-    config = load_app_config(APP_NAME, defaults=DEFAULT_CONFIG, search_dirs=search_dirs)
+def _load_config(cfg):
+    search_dirs = [cfg.args.config_dir] if cfg.args.config_dir else None
+    return load_app_config(APP_NAME, defaults=DEFAULT_CONFIG, search_dirs=search_dirs)
 
+
+def main(argv=None):
+    cfg = AppOneConfig(
+        anchor=__file__,
+        argv=argv,
+        with_dry_run=True,
+        extra_args=_extra_args,
+        load_config=_load_config,
+    )
+    args, config, log = cfg.args, cfg.CONFIG, cfg.LOGGER
+
+    template_file = cfg.ROUTER / "assets" / "email_template.txt"
     template = (
-        read_app_asset(APP_NAME, "email_template.txt") or "$greeting,\n\n$app report for $date.\n"
+        template_file.read_text(encoding="utf-8")
+        if template_file.is_file()
+        else FALLBACK_TEMPLATE
     )
     report = build_report(config, template)
 
     # Single txt file bundled via EXTRA_DATAS: appended as the footer.
-    disclaimer_path = app_file_path(APP_NAME, "disclaimer.txt")
-    if disclaimer_path:
-        with open(disclaimer_path, encoding="utf-8") as f:
-            report = report.rstrip("\n") + "\n\n" + f.read().strip() + "\n"
+    disclaimer_file = cfg.ROUTER / "disclaimer.txt"
+    if disclaimer_file.is_file():
+        report = (
+            report.rstrip("\n") + "\n\n" + disclaimer_file.read_text(encoding="utf-8").strip() + "\n"
+        )
     else:
         log.warning("bundled disclaimer.txt not found, sending without footer")
     log.info("report built:\n%s", report)
 
-    mail = MailClient(MailConfig.from_env(), dry_run=args.dry_run)
-    sent = mail.send(config["recipients"], config["subject"], report)
+    cfg.MAILER = MailClient(MailConfig.from_env(), dry_run=args.dry_run)
+    sent = cfg.MAILER.send(config["recipients"], config["subject"], report)
     if not sent:
         log.error("failed to send report")
         return 1

@@ -3,6 +3,8 @@ except ``common.db``, which needs SQLAlchemy.
 
 Subpackages:
 
+- ``common.app_config`` — bootstrap template for linear apps
+  (``AppConfig``, ``Router``): args, config, logging, paths.
 - ``common.cli`` — standard argparse flags (``build_parser``,
   ``resolve_log_level``).
 - ``common.config`` — validated JSON config (``Config``,
