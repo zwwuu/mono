@@ -1,0 +1,18 @@
+{
+  "approval": false,
+  "destinations": [
+    {
+      "dir": "direct",
+      "type": "local"
+    },
+    {
+      "dir": "direct-share",
+      "type": "smb"
+    }
+  ],
+  "enabled": true,
+  "id": "scenario-no-approval",
+  "name": "Scenario: no approval at all",
+  "notify": false,
+  "rename": "{date}_{name}{ext}"
+}

@@ -1,0 +1,18 @@
+{
+  "id": "scenario-smb-source",
+  "name": "Scenario: initial file is on a share",
+  "source": {
+    "type": "smb",
+    "dir": "share",
+    "pattern": "data-*.csv"
+  },
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "smb-picked"
+    }
+  ],
+  "notify": false
+}

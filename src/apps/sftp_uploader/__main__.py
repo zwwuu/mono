@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import sys
 
-from common.cli import build_parser
-from common.logging import log, setup_logging
+from common.app_config import AppConfig
+from common.logging import setup_logging
 
 from . import __version__
 from .config import ConfigError, load_config
@@ -28,44 +28,47 @@ def setup_logging_from_config(config, verbose=False):
     )
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser(
-        prog="sftp-uploader",
-        description="Find a local file by pattern and upload it to an SFTP server.",
-        version=__version__,
-        with_config=True,
-        with_dry_run=True,
-        with_verbose=True,
-    )
-    args = parser.parse_args(argv)
+class SftpUploaderApp(AppConfig):
+    APP_NAME = "sftp-uploader"
+    VERSION = __version__
+    DESCRIPTION = "Find a local file by pattern and upload it to an SFTP server."
+    WITH_CONFIG = True
+    WITH_DRY_RUN = True
+    WITH_VERBOSE = True
 
-    try:
-        config = load_config(args.config)
-    except ConfigError as exc:
-        print(f"config error: {exc}", file=sys.stderr)
-        return 2
-
-    setup_logging_from_config(config, verbose=args.verbose)
-    if args.verbose:
-        log.debug("verbose: DEBUG logging forced by --verbose")
-    log.info("starting sftp-uploader %s (config: %s)", __version__, args.config)
-
-    if args.dry_run:
-        ctx = RunContext(config, attempt=1)
+    def load_config(self):
         try:
-            FindFileStep().run(ctx)
-        except FileNotFoundError as exc:
-            log.error("dry-run: %s", exc)
-            return 3
-        log.info("dry-run: would upload %s", ctx.local_path)
-        print(f"would upload: {ctx.local_path}")
-        return 0
+            return load_config(self.args.config)
+        except ConfigError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            raise SystemExit(2)
 
-    try:
-        return Pipeline(config).execute()
-    except KeyboardInterrupt:
-        log.warning("interrupted by user")
-        return 130
+    def setup(self):
+        # Logging level comes from the config file (not just CLI flags),
+        # so re-apply it here — setup_logging() is idempotent.
+        setup_logging_from_config(self.CONFIG, verbose=self.args.verbose)
+        if self.args.verbose:
+            self.LOGGER.debug("verbose: DEBUG logging forced by --verbose")
+        self.LOGGER.info(
+            "starting sftp-uploader %s (config: %s)", self.VERSION, self.args.config
+        )
+
+    def run(self):
+        if self.args.dry_run:
+            ctx = RunContext(self.CONFIG, attempt=1)
+            try:
+                FindFileStep().run(ctx)
+            except FileNotFoundError as exc:
+                self.LOGGER.error("dry-run: %s", exc)
+                return 3
+            self.LOGGER.info("dry-run: would upload %s", ctx.local_path)
+            print(f"would upload: {ctx.local_path}")
+            return 0
+        return Pipeline(self.CONFIG).execute()
+
+
+def main(argv: list[str] | None = None) -> int:
+    return SftpUploaderApp.main(anchor=__file__, argv=argv)
 
 
 if __name__ == "__main__":

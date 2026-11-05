@@ -1,0 +1,20 @@
+{
+  "approval_after": [
+    "copy"
+  ],
+  "destinations": [
+    {
+      "dir": "gate-a",
+      "type": "local"
+    },
+    {
+      "dir": "gate-b",
+      "type": "local"
+    }
+  ],
+  "enabled": true,
+  "id": "scenario-approval-after-every-copy",
+  "name": "Scenario: approval after every move",
+  "notify": false,
+  "rename": "{date}_{name}{ext}"
+}

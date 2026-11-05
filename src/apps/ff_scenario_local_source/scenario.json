@@ -1,0 +1,18 @@
+{
+  "approval": false,
+  "destinations": [
+    {
+      "dir": "local-source-out",
+      "type": "local"
+    }
+  ],
+  "enabled": true,
+  "id": "scenario-local-source",
+  "name": "Scenario: local source file, no download",
+  "notify": false,
+  "rename": "LOCAL-{date}_{name}{ext}",
+  "source": {
+    "path": "demo_source/input_report.csv",
+    "type": "local"
+  }
+}

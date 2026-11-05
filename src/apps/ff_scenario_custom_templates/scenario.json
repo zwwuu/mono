@@ -1,0 +1,33 @@
+{
+  "enabled": true,
+  "failure_subject": "[FileFlow] {task} FAILED at {step}: {error}",
+  "failure_template": "Task {task} run #{run_id} failed at step {step}.\nReason: {error}\nFile: {current_name}\n",
+  "id": "scenario-custom-templates",
+  "name": "Scenario: custom success and failure templates",
+  "steps": [
+    {
+      "type": "fetch"
+    },
+    {
+      "type": "checksum"
+    },
+    {
+      "pattern": "{date}_{name}{ext}",
+      "type": "rename"
+    },
+    {
+      "failure_subject": "[FileFlow] {task} COPY FAILED: {error}",
+      "failure_template": "Copy step failed for {current_name}: {error}\n",
+      "to": {
+        "dir": "templated",
+        "type": "local"
+      },
+      "type": "copy"
+    },
+    {
+      "type": "notify",
+      "subject": "[FileFlow] {task} done: {current_name}",
+      "template": "Task {task} completed {current_name}.\nSHA-256: {sha256}\n"
+    }
+  ]
+}

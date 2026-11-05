@@ -1,0 +1,44 @@
+{
+  "id": "scenario-browser-source",
+  "name": "Scenario: download by logging into a portal",
+  "source": {
+    "type": "browser",
+    "actions": [
+      {
+        "action": "goto",
+        "url": "https://portal.example.com/login"
+      },
+      {
+        "action": "fill",
+        "selector": "#username",
+        "value": "alice"
+      },
+      {
+        "action": "fill",
+        "selector": "#password",
+        "secret": "PORTAL_PASSWORD"
+      },
+      {
+        "action": "click",
+        "selector": "button[type=submit]"
+      },
+      {
+        "action": "wait_for",
+        "selector": "a.download"
+      },
+      {
+        "action": "download",
+        "selector": "a.download"
+      }
+    ]
+  },
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "portal"
+    }
+  ],
+  "notify": false
+}

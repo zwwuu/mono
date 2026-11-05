@@ -1,0 +1,39 @@
+{
+  "enabled": true,
+  "id": "scenario-process-before-rename",
+  "name": "Scenario: processing happens before rename and copy",
+  "steps": [
+    {
+      "type": "fetch"
+    },
+    {
+      "type": "checksum"
+    },
+    {
+      "to": {
+        "dir": "inbox",
+        "type": "ftp"
+      },
+      "type": "copy"
+    },
+    {
+      "dir": "processed",
+      "pattern": "{current_name}",
+      "type": "wait_processed"
+    },
+    {
+      "type": "fetch_processed"
+    },
+    {
+      "pattern": "PROC-{date}_{name}{ext}",
+      "type": "rename"
+    },
+    {
+      "to": {
+        "dir": "processed-out",
+        "type": "local"
+      },
+      "type": "copy"
+    }
+  ]
+}

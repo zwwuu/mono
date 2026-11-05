@@ -1,0 +1,19 @@
+{
+  "id": "scenario-local-dir-source",
+  "name": "Scenario: initial file is in a local dir",
+  "source": {
+    "type": "local",
+    "dir": "inbox",
+    "pattern": "*.csv",
+    "sort": "newest"
+  },
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "dir-picked"
+    }
+  ],
+  "notify": false
+}

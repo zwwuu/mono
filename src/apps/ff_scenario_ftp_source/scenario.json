@@ -1,0 +1,19 @@
+{
+  "id": "scenario-ftp-source",
+  "name": "Scenario: initial file is on FTP",
+  "source": {
+    "type": "ftp",
+    "dir": "inbox",
+    "pattern": "report-*.csv",
+    "sort": "newest"
+  },
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "ftp-picked"
+    }
+  ],
+  "notify": false
+}

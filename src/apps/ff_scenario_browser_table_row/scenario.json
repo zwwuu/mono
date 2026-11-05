@@ -1,0 +1,34 @@
+{
+  "id": "scenario-browser-table-row",
+  "name": "Scenario: download the row titled X from a table",
+  "source": {
+    "type": "browser",
+    "actions": [
+      {
+        "action": "goto",
+        "url": "https://portal.example.com/files"
+      },
+      {
+        "action": "download",
+        "selector": {
+          "kind": "row",
+          "table": "#files",
+          "column": "Title",
+          "match": {
+            "equals": "Q3 Report"
+          },
+          "target": "a.download"
+        }
+      }
+    ]
+  },
+  "approval": false,
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "portal-rows"
+    }
+  ],
+  "notify": false
+}

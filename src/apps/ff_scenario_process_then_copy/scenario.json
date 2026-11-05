@@ -1,0 +1,21 @@
+{
+  "destinations": [
+    {
+      "dir": "inbox",
+      "type": "ftp"
+    },
+    {
+      "dir": "final",
+      "type": "local"
+    }
+  ],
+  "enabled": true,
+  "id": "scenario-process-then-copy",
+  "name": "Scenario: processing first, then copy onward",
+  "notify": true,
+  "processing": {
+    "dir": "processed",
+    "pattern": "{renamed_name}"
+  },
+  "rename": "{date}_{name}{ext}"
+}

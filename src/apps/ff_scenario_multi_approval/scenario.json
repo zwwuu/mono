@@ -1,0 +1,18 @@
+{
+  "approval_after": [
+    "fetch",
+    "rename",
+    "copy"
+  ],
+  "destinations": [
+    {
+      "dir": "approved",
+      "type": "local"
+    }
+  ],
+  "enabled": true,
+  "id": "scenario-multi-approval",
+  "name": "Scenario: approvals after download, rename and move",
+  "notify": true,
+  "rename": "{date}_{name}{ext}"
+}

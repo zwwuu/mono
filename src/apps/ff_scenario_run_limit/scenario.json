@@ -1,0 +1,17 @@
+{
+  "id": "scenario-run-limit",
+  "name": "Scenario: at most 3 runs per day",
+  "approval": false,
+  "notify": false,
+  "run_limit": {
+    "max": 3,
+    "period": "day"
+  },
+  "rename": "{date}_{name}{ext}",
+  "destinations": [
+    {
+      "type": "local",
+      "dir": "limited"
+    }
+  ]
+}

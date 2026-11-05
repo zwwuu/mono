@@ -1,0 +1,17 @@
+{
+  "enabled": true,
+  "id": "scenario-no-destination",
+  "name": "Scenario: no final destination, no processing",
+  "steps": [
+    {
+      "type": "fetch"
+    },
+    {
+      "type": "checksum"
+    },
+    {
+      "pattern": "{date}_{name}{ext}",
+      "type": "rename"
+    }
+  ]
+}

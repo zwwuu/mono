@@ -1,0 +1,43 @@
+{
+  "enabled": true,
+  "id": "scenario-conditional-notify",
+  "name": "Scenario: conditional notification",
+  "steps": [
+    {
+      "type": "fetch"
+    },
+    {
+      "type": "checksum"
+    },
+    {
+      "pattern": "{date}_{name}{ext}",
+      "type": "rename"
+    },
+    {
+      "to": {
+        "dir": "conditional",
+        "type": "local"
+      },
+      "type": "copy"
+    },
+    {
+      "subject": "[FileFlow] big file: {current_name}",
+      "template": "File {current_name} is {downloaded_size} bytes, over the threshold.",
+      "type": "notify",
+      "when": {
+        "field": "downloaded_size",
+        "op": "gt",
+        "value": 1000000
+      }
+    },
+    {
+      "subject": "[FileFlow] done: {current_name}",
+      "template": "Task {task} finished {current_name} (sha256 {sha256}).",
+      "type": "notify",
+      "when": {
+        "field": "sha256",
+        "op": "exists"
+      }
+    }
+  ]
+}
