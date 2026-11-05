@@ -60,7 +60,6 @@
 # copies the renamed file.
 import json
 import os
-import re
 from typing import Annotated, Any, Literal, Union
 
 from pydantic import (
@@ -74,28 +73,13 @@ from pydantic import (
     model_validator,
 )
 
-STEP_TYPES = (
-    "fetch",
-    "checksum",
-    "approval",
-    "rename",
-    "copy",
-    "wait_processed",
-    "fetch_processed",
-    "notify",
+from common.pipeline.builder import (
+    DEFAULT_RENAME,
+    TaskError,
+    base_shorthand_steps,
+    step_keys,
+    validate_rename_pattern,
 )
-
-COPY_TYPES = ("ftp", "local", "smb")
-SOURCE_TYPES = ("website", "local", "ftp", "smb", "browser")
-RUN_LIMIT_PERIODS = ("day", "week", "month", "total")
-ID_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
-
-DEFAULT_RENAME = "{date}_{name}{ext}"
-
-
-class TaskError(ValueError):
-    pass
-
 
 # ------------------------------------------------------- Pydantic models
 # Task shape, validated by Pydantic at the registry boundary (load/save
@@ -323,31 +307,6 @@ def default_tasks_path(cfg):
     return os.path.join(base, "tasks.json")
 
 
-def _is_plain_filename(name):
-    return bool(name) and name not in (".", "..") and "/" not in name and "\\" not in name
-
-
-def validate_rename_pattern(pattern):
-    """Render the pattern with dummy tokens; the result must be a filename."""
-    from .steps import render_rename  # deferred: steps imports tasks only for types
-
-    try:
-        rendered = render_rename(
-            pattern,
-            original="input_report.csv",
-            sha256="0" * 64,
-            run_id=1,
-            task_id="dummy-task",
-        )
-    except (KeyError, ValueError, IndexError) as e:
-        raise TaskError(f"invalid rename pattern {pattern!r}: {e}") from e
-    if not _is_plain_filename(rendered):
-        raise TaskError(
-            f"rename pattern {pattern!r} must produce a plain filename, got {rendered!r}"
-        )
-    return pattern
-
-
 def validate_task(task, existing_ids=()):
     """Validate a task dict. Returns the task unchanged.
 
@@ -374,7 +333,7 @@ def validate_task(task, existing_ids=()):
         validate_rename_pattern(task["rename"])
     source = task.get("source")
     if isinstance(source, dict) and source.get("type") == "browser":
-        from ..infra.browser_fetch import BrowserSourceError, validate_actions
+        from common.pipeline.browser_fetch import BrowserSourceError, validate_actions
 
         try:
             validate_actions(source.get("actions"))
@@ -382,126 +341,12 @@ def validate_task(task, existing_ids=()):
             raise TaskError(f"task {tid!r} browser source: {e}") from e
     if "approval_after" in task:
         points = task["approval_after"]
-        base = _base_shorthand_steps(task)
-        keys, types = _step_keys(base)
+        base = base_shorthand_steps(task)
+        keys, types = step_keys(base)
         for point in points:
             if point not in keys and point not in types:
                 raise TaskError(f"task {tid!r} approval_after point {point!r} matches no step")
     return task
-
-
-def build_pipeline(task):
-    """Expand a task into [(key, label, fn_name, params)].
-
-    Keys are unique within the pipeline so retry/attempt tracking works
-    even with several copy steps.
-    """
-    from . import steps as steps_mod
-
-    raw_steps = task.get("steps")
-    if raw_steps is None:
-        raw_steps = _shorthand_steps(task)
-    pipeline = []
-    seen = {}
-    for step in raw_steps:
-        stype = step["type"]
-        seen[stype] = seen.get(stype, 0) + 1
-        key = stype if seen[stype] == 1 else f"{stype}:{seen[stype]}"
-        if stype == "copy":
-            to = step["to"]
-            key = f"copy:{to['type']}:{to['dir']}"
-            label = f"Copy to {to['type']}:{to['dir']}"
-        else:
-            label = steps_mod.STEP_LABELS[stype]
-        pipeline.append((key, label, stype, dict(step)))
-    return pipeline
-
-
-def _step_keys(steps):
-    """(keys, types) for a raw step list, using build_pipeline's key rule."""
-    keys, types = [], []
-    seen = {}
-    for step in steps:
-        stype = step["type"]
-        types.append(stype)
-        if stype == "copy":
-            keys.append(f"copy:{step['to']['type']}:{step['to']['dir']}")
-        else:
-            seen[stype] = seen.get(stype, 0) + 1
-            keys.append(stype if seen[stype] == 1 else f"{stype}:{seen[stype]}")
-    return keys, types
-
-
-def _insert_approvals(steps, points):
-    """Insert an approval step after every step whose key or type is in
-    points ('copy' matches every copy step; 'copy:local:arc' one of them)."""
-    keys, _types = _step_keys(steps)
-    out = []
-    for step, key in zip(steps, keys):
-        out.append(step)
-        if key in points or step["type"] in points:
-            out.append({"type": "approval"})
-    return out
-
-
-def _notify_params(task):
-    """Params for the shorthand trailing notify step."""
-    params = {}
-    if isinstance(task.get("notify"), dict):
-        params.update(task["notify"])
-    if task.get("success_template"):
-        params.setdefault("template", task["success_template"])
-    if task.get("success_subject"):
-        params.setdefault("subject", task["success_subject"])
-    if task.get("recipients"):
-        params.setdefault("recipients", task["recipients"])
-    return params
-
-
-def _base_shorthand_steps(task):
-    steps = [{"type": "fetch"}, {"type": "checksum"}]
-    steps.append({"type": "rename", "pattern": task.get("rename", DEFAULT_RENAME)})
-    dests = list(task.get("destinations", []))
-    processing = task.get("processing")
-    if processing:
-        ftp_dests = [d for d in dests if d["type"] == "ftp"]
-        inbox = ftp_dests[0] if ftp_dests else {"type": "ftp", "dir": "inbox"}
-        steps.append({"type": "copy", "to": inbox})
-        steps.append(
-            {
-                "type": "wait_processed",
-                "dir": processing.get("dir", "processed"),
-                "pattern": processing.get("pattern", "{renamed_name}"),
-                "timeout_seconds": processing.get("timeout_seconds", 300),
-                "poll_seconds": processing.get("poll_seconds", 5),
-            }
-        )
-        steps.append({"type": "fetch_processed"})
-        rest = [d for d in dests if d is not inbox] if ftp_dests else dests
-        for d in rest:
-            steps.append({"type": "copy", "to": d})
-    else:
-        for d in dests:
-            steps.append({"type": "copy", "to": d})
-    if task.get("notify", True):
-        steps.append({"type": "notify", **_notify_params(task)})
-    return steps
-
-
-def _shorthand_steps(task):
-    steps = _base_shorthand_steps(task)
-    if "approval_after" in task:
-        # approval points are explicit: no default approval is added
-        return _insert_approvals(steps, task["approval_after"])
-    if task.get("approval", True):
-        # the classic single gate, right after checksum
-        out = []
-        for step in steps:
-            out.append(step)
-            if step["type"] == "checksum":
-                out.append({"type": "approval"})
-        return out
-    return steps
 
 
 class TaskRegistry:

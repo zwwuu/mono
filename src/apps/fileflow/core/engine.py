@@ -10,10 +10,9 @@ import threading
 from datetime import datetime, timedelta
 
 from common.logging import log
-
-from ..infra.notify import send_email
-from . import steps as steps_mod
-from . import tasks as tasks_mod
+from common.pipeline import steps as steps_mod
+from common.pipeline.builder import build_pipeline
+from common.pipeline.notify import send_email
 
 STEP_TIMEOUT_DEFAULT = 300  # seconds per step unless config overrides
 
@@ -170,7 +169,7 @@ class Engine:
             self.log(run_id, "Run FAILED: its task was removed", "ERROR")
             return
         self.db.update_run(run_id, status="RUNNING", error=None)
-        step_list = tasks_mod.build_pipeline(task)
+        step_list = build_pipeline(task)
         for idx in range(from_step, len(step_list)):
             key, label, _stype, params = step_list[idx]
             run = self.db.get_run(run_id)
@@ -341,7 +340,7 @@ class Engine:
         _run, task = self._task_for(run_id)
         if task is None:
             return False
-        step_keys = [s[0] for s in tasks_mod.build_pipeline(task)]
+        step_keys = [s[0] for s in build_pipeline(task)]
         if run["current_step"] not in step_keys:
             self.db.update_run(
                 run_id, status="FAILED", error=f"step {run['current_step']!r} no longer in task"

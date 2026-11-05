@@ -12,9 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from apps.fileflow.core.headless import run_pipeline
-from apps.fileflow.core.steps import STEP_FUNCS
-from apps.fileflow.core.tasks import TaskError, build_pipeline, validate_task
+from apps.fileflow.core.tasks import validate_task
+from common.pipeline import STEP_FUNCS, TaskError, build_pipeline, run_pipeline
 
 ROOT = Path(__file__).resolve().parents[2]
 APPS_DIR = ROOT / "src" / "apps"

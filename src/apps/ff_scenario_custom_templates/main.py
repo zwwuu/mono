@@ -1,15 +1,14 @@
 """Scenario: custom success and failure templates — headless FileFlow pipeline app.
 
 The pipeline is defined by scenario.json in this directory. It is
-resolved with FileFlow's build_pipeline() at runtime and executed
+resolved with common.pipeline's build_pipeline() at runtime and executed
 headlessly (no DB, dashboard, or scheduler).
 """
 
 import json
 
-from apps.fileflow.core.headless import run_pipeline
-from apps.fileflow.core.tasks import build_pipeline, validate_task
 from common.app_config import AppConfig
+from common.pipeline import build_pipeline, run_pipeline
 
 from . import meta
 
@@ -35,10 +34,7 @@ class FfScenarioCustomTemplatesApp(AppConfig):
         task source, "recipients" replaces notify recipients, and
         "smtp"/"ftp"/"smb" sections configure those backends.
         """
-        scenario = json.loads(
-            (self.ROUTER / "scenario.json").read_text(encoding="utf-8")
-        )
-        validate_task(scenario)
+        scenario = json.loads((self.ROUTER / "scenario.json").read_text(encoding="utf-8"))
         task = {
             "id": scenario["id"],
             "name": scenario.get("name", scenario["id"]),
@@ -54,9 +50,7 @@ class FfScenarioCustomTemplatesApp(AppConfig):
         if "recipients" in config:
             task["recipients"] = config["recipients"]
         workdir = self.args.workdir or f"./{self.APP_NAME}-work"
-        return run_pipeline(
-            build_pipeline(scenario), task, config, self.LOGGER, workdir
-        )
+        return run_pipeline(build_pipeline(scenario), task, config, self.LOGGER, workdir)
 
 
 def main(argv=None):

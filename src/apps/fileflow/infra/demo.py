@@ -32,7 +32,7 @@ def ensure_demo_source(cfg):
 
 def demo_mappings(tasks):
     """Inbox → processed dir mapping for the demo processor."""
-    from ..core.tasks import build_pipeline
+    from common.pipeline.builder import build_pipeline
 
     mapping = {"inbox": "processed"}
     for task in tasks or []:

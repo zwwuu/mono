@@ -37,9 +37,9 @@ from fastapi import Body, FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 
 from common.logging import log
+from common.pipeline.builder import TaskError
 
 from ..core.engine import AlreadyRunningError, RunLimitExceeded, count_runs_in_period
-from ..core.tasks import TaskError
 from ..scheduling import scheduler as sched_mod
 
 

@@ -97,17 +97,19 @@ def resolve_secret(value, where):
     the env var is missing or the mapping is malformed."""
     if isinstance(value, dict):
         if set(value) != {"env"} or not value["env"]:
-            raise ConfigError(
-                f"config: {where} must be a string or {{\"env\": \"VAR\"}}"
-            )
+            raise ConfigError(f'config: {where} must be a string or {{"env": "VAR"}}')
         env_val = os.environ.get(value["env"])
         if not env_val:
             raise ConfigError(
-                f"config: {where} refers to env var {value['env']!r}, "
-                "which is not set"
+                f"config: {where} refers to env var {value['env']!r}, which is not set"
             )
         return env_val
     return value
+
+
+def env_secret(name):
+    """Secrets come from environment variables, never from the config file."""
+    return os.environ.get(name, "")
 
 
 def redact(data, secret_paths):
