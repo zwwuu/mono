@@ -12,6 +12,9 @@ Subpackages:
   ``Database``, ``create_engine_for``). Needs SQLAlchemy.
 - ``common.logging`` — the shared static logger (``log``) plus ``setup_logging``.
 - ``common.mail`` — SMTP mail client (``MailClient``, ``MailConfig``).
+- ``common.sysinfo`` — runtime system, user, and network info
+  (``system_info``, ``user_info``, ``network_info``, ``runtime_info``,
+  ``all_info``). Windows first.
 - ``common.utils`` — paths, config, JSON, and small utilities
   (``load_app_config``, ``app_file_path``, ``retry``, ...).
 
