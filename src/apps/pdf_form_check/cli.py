@@ -18,26 +18,44 @@ from .exit_codes import ExitCode
 from .matcher import YesMatcher
 
 
-class PdfCheckConfig(AppConfig):
+class PdfCheckApp(AppConfig):
     APP_NAME = APP_NAME
     VERSION = __version__
     DESCRIPTION = "Check a PDF form: exit 1 when field A1 or A2 is 'yes'."
 
+    def extra_args(self, parser):
+        parser.add_argument("pdf", help="path to the PDF form")
+        parser.add_argument(
+            "--fields",
+            nargs="+",
+            default=list(DEFAULT_FIELDS),
+            metavar="NAME",
+            help="field names to check (default: A1 A2)",
+        )
+        parser.add_argument(
+            "--quiet",
+            action="store_true",
+            help="print nothing on success; the exit code is the result",
+        )
 
-def _extra_args(parser):
-    parser.add_argument("pdf", help="path to the PDF form")
-    parser.add_argument(
-        "--fields",
-        nargs="+",
-        default=list(DEFAULT_FIELDS),
-        metavar="NAME",
-        help="field names to check (default: A1 A2)",
-    )
-    parser.add_argument(
-        "--quiet",
-        action="store_true",
-        help="print nothing on success; the exit code is the result",
-    )
+    def setup(self):
+        # pypdf logs parse warnings to stderr; the caller gets one error
+        # line from us instead, so silence everything below ERROR here.
+        logging.getLogger("pypdf").setLevel(logging.ERROR)
+
+    def run(self):
+        """Run the check; return the exit code (never raises for bad input)."""
+        args = self.args
+        matcher = YesMatcher()
+        checker = FormChecker(fields=args.fields, matcher=matcher)
+        try:
+            result = checker.check(args.pdf)
+        except FormCheckError as exc:
+            print(f"{APP_NAME}: error: {exc}", file=sys.stderr)
+            return int(exc.exit_code)
+        if not args.quiet:
+            print(format_result(result, matcher))
+        return int(ExitCode.MATCH if result.matched else ExitCode.NO_MATCH)
 
 
 def format_result(result, matcher):
@@ -54,19 +72,4 @@ def format_result(result, matcher):
 
 
 def main(argv=None):
-    """Run the check; return the exit code (never raises for bad input)."""
-    # pypdf logs parse warnings to stderr; the caller gets one error
-    # line from us instead, so silence everything below ERROR here.
-    logging.getLogger("pypdf").setLevel(logging.ERROR)
-    cfg = PdfCheckConfig(anchor=__file__, argv=argv, extra_args=_extra_args)
-    args = cfg.args
-    matcher = YesMatcher()
-    checker = FormChecker(fields=args.fields, matcher=matcher)
-    try:
-        result = checker.check(args.pdf)
-    except FormCheckError as exc:
-        print(f"{APP_NAME}: error: {exc}", file=sys.stderr)
-        return int(exc.exit_code)
-    if not args.quiet:
-        print(format_result(result, matcher))
-    return int(ExitCode.MATCH if result.matched else ExitCode.NO_MATCH)
+    return PdfCheckApp.main(anchor=__file__, argv=argv)

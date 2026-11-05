@@ -8,17 +8,19 @@ from common.sysinfo import all_info
 from . import meta
 
 
-class SysinfoConfig(AppConfig):
+class SysinfoApp(AppConfig):
     APP_NAME = meta.APP_NAME
     VERSION = meta.__version__
     DESCRIPTION = "Print runtime system, user, and network info as JSON."
 
+    def run(self):
+        self.LOGGER.info("printing system info")
+        print(json.dumps(all_info(), indent=2))
+        return 0
+
 
 def main(argv=None):
-    cfg = SysinfoConfig(anchor=__file__, argv=argv)
-    cfg.LOGGER.info("printing system info")
-    print(json.dumps(all_info(), indent=2))
-    return 0
+    return SysinfoApp.main(anchor=__file__, argv=argv)
 
 
 if __name__ == "__main__":
