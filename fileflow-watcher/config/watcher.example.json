@@ -1,0 +1,25 @@
+{
+  "ftp_root": "/srv/ftp",
+  "jobs": {
+    "daily-report": {
+      "expect_csv": true,
+      "output_pattern": "{name}",
+      "procedure": "normalize-csv",
+      "share_dir": "reports/daily",
+      "outbound": true
+    },
+    "invoices": {
+      "expect_csv": true,
+      "output_pattern": "PROC-{name}",
+      "procedure": "uppercase-headers-csv",
+      "share_dir": "finance/invoices"
+    }
+  },
+  "ledger_db": "/var/lib/fileflow-watcher/watcher.db",
+  "share_root": "/mnt/share",
+  "outbound": {
+    "requests_dir": "upload-requests",
+    "archive_dir": "upload-archive",
+    "min_age_seconds": 2
+  }
+}
