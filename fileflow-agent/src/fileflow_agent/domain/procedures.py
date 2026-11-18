@@ -21,6 +21,7 @@ Built-ins below are examples. Add yours in ``procedures_local.py``
 (next to the watcher config) and import it -- no change to the
 watcher itself is needed.
 """
+
 from __future__ import annotations
 
 import csv
@@ -36,13 +37,12 @@ def register_procedure(name: str, version: str, fn) -> None:
 
 def get_procedure(name: str) -> dict:
     if name not in REGISTRY:
-        raise ValueError(
-            f"unknown procedure {name!r}; registered: {sorted(REGISTRY)}"
-        )
+        raise ValueError(f"unknown procedure {name!r}; registered: {sorted(REGISTRY)}")
     return REGISTRY[name]
 
 
 # -- built-in procedures ------------------------------------------------
+
 
 def rename_only(input_path: Path, workdir: Path, ctx: dict) -> Path:
     """No content change; the watcher renames on publish via output_pattern."""

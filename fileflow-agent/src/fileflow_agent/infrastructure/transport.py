@@ -18,13 +18,14 @@ Transports:
   * ``sftp``  -- SFTP via paramiko. Preferred on a real network:
     encrypted credentials + data. ``pip install paramiko``.
 """
+
 from __future__ import annotations
 
 import ftplib
 import shutil
 from pathlib import Path
 
-from .common import PART_SUFFIX, log
+from .filesystem import PART_SUFFIX, log
 
 
 class Transport:
@@ -51,22 +52,27 @@ class Transport:
         pass
 
     # -- shared helpers -------------------------------------------------
-    def upload_with_manifest(self, local_path: str | Path, manifest_path: str | Path,
-                             remote_dir: str, remote_name: str) -> None:
-        """Upload data file first, manifest last (manifest rename = trigger)."""
-        self.upload(local_path, remote_dir, remote_name)
-        self._verify_size(local_path, remote_dir, remote_name)
+    def upload_many_with_manifest(
+        self,
+        files: list[tuple[str | Path, str]],
+        manifest_path: str | Path,
+        remote_dir: str,
+    ) -> None:
+        """Upload every data file first, manifest last (its rename is
+        the trigger that tells the watcher the batch is complete)."""
+        for local_path, remote_name in files:
+            self.upload(local_path, remote_dir, remote_name)
+            self._verify_size(local_path, remote_dir, remote_name)
         manifest_name = Path(manifest_path).name
         self.upload(manifest_path, remote_dir, manifest_name)
         self._verify_size(manifest_path, remote_dir, manifest_name)
-        log.info("uploaded %s + %s to %s", remote_name, manifest_name, remote_dir)
+        log.info("uploaded %d file(s) + %s to %s", len(files), manifest_name, remote_dir)
 
-    def _verify_size(self, local_path: str | Path, remote_dir: str,
-                     remote_name: str) -> None:
+    def _verify_size(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
         expected = Path(local_path).stat().st_size
         actual = self.remote_size(remote_dir, remote_name)
         if actual is not None and actual != expected:
-            raise IOError(
+            raise OSError(
                 f"size mismatch after upload: {remote_name} "
                 f"expected {expected}, remote has {actual}"
             )
@@ -113,8 +119,9 @@ class LocalTransport(Transport):
 class FtpTransport(Transport):
     kind = "ftp"
 
-    def __init__(self, host: str, port: int = 21, username: str = "",
-                 password: str = "", timeout: int = 30):
+    def __init__(
+        self, host: str, port: int = 21, username: str = "", password: str = "", timeout: int = 30
+    ):
         self.ftp = ftplib.FTP()
         self.ftp.connect(host, port, timeout=timeout)
         self.ftp.login(username, password)
@@ -139,47 +146,58 @@ class FtpTransport(Transport):
         try:
             self.ftp.cwd(remote_dir)
             return sorted(self.ftp.nlst())
-        except (ftplib.error_perm, OSError):
+        except (ftplib.error_perm, OSError) as _:
             return []
 
     def delete(self, remote_dir: str, remote_name: str) -> None:
         try:
             self.ftp.cwd(remote_dir)
             self.ftp.delete(remote_name)
-        except (ftplib.error_perm, OSError):
+        except (ftplib.error_perm, OSError) as _:
             pass
 
     def remote_size(self, remote_dir: str, remote_name: str) -> int | None:
         try:
             self.ftp.cwd(remote_dir)
             return self.ftp.size(remote_name)
-        except (ftplib.error_perm, OSError):
+        except (ftplib.error_perm, OSError) as _:
             return None
 
     def close(self) -> None:
         try:
             self.ftp.quit()
-        except (ftplib.Error, OSError):
+        except (ftplib.Error, OSError) as _:
             pass
 
 
 class SftpTransport(Transport):
     kind = "sftp"
 
-    def __init__(self, host: str, port: int = 22, username: str = "",
-                 password: str | None = None, key_file: str | None = None,
-                 timeout: int = 30):
+    def __init__(
+        self,
+        host: str,
+        port: int = 22,
+        username: str = "",
+        password: str | None = None,
+        key_file: str | None = None,
+        timeout: int = 30,
+    ):
         try:
             import paramiko
         except ImportError as e:
-            raise ImportError(
-                "sftp transport needs paramiko: pip install paramiko"
-            ) from e
+            raise ImportError("sftp transport needs paramiko: pip install paramiko") from e
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        client.connect(host, port=port, username=username, password=password,
-                       key_filename=key_file, timeout=timeout,
-                       allow_agent=False, look_for_keys=False)
+        client.connect(
+            host,
+            port=port,
+            username=username,
+            password=password,
+            key_filename=key_file,
+            timeout=timeout,
+            allow_agent=False,
+            look_for_keys=False,
+        )
         self._client = client
         self.sftp = client.open_sftp()
 
@@ -218,8 +236,8 @@ class SftpTransport(Transport):
         try:
             self.sftp.close()
             self._client.close()
-        except (OSError, Exception):
-            pass
+        except (OSError, Exception) as e:  # noqa: BLE001 -- close() must never raise
+            log.debug("sftp close failed (ignored): %s", e)
 
 
 def build_transport(cfg: dict) -> Transport:
@@ -235,12 +253,18 @@ def build_transport(cfg: dict) -> Transport:
     if kind == "local":
         return LocalTransport(cfg["root"])
     if kind == "ftp":
-        return FtpTransport(cfg["host"], cfg.get("port", 21),
-                            cfg.get("username", ""),
-                            os.environ.get("FILEFLOW_FTP_PASSWORD", ""))
+        return FtpTransport(
+            cfg["host"],
+            cfg.get("port", 21),
+            cfg.get("username", ""),
+            os.environ.get("FILEFLOW_FTP_PASSWORD", ""),
+        )
     if kind == "sftp":
-        return SftpTransport(cfg["host"], cfg.get("port", 22),
-                             cfg.get("username", ""),
-                             os.environ.get("FILEFLOW_FTP_PASSWORD") or None,
-                             os.environ.get("FILEFLOW_SFTP_KEY_FILE"))
+        return SftpTransport(
+            cfg["host"],
+            cfg.get("port", 22),
+            cfg.get("username", ""),
+            os.environ.get("FILEFLOW_FTP_PASSWORD") or None,
+            os.environ.get("FILEFLOW_SFTP_KEY_FILE"),
+        )
     raise ValueError(f"unknown transport {kind!r} (want local|ftp|sftp)")

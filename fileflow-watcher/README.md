@@ -5,7 +5,7 @@ drive. One of two projects — the other is **fileflow-agent**,
 which runs on the dedicated Ethernet PC. The two projects share
 no code: each is self-contained and is deployed and updated on
 its own machine. The only contract between them is the manifest
-format (`common.py`: `MANIFEST_VERSION`) and the idempotency key
+format (`domain/entities.py`: `MANIFEST_VERSION`) and the idempotency key
 (`job|run_id|input-sha256`). Change either in one project,
 change it in the other, and bump `MANIFEST_VERSION`.
 
@@ -23,37 +23,45 @@ share drive ──► FTP server (Watcher, this machine) ──► Ethernet PC �
 
 It does **not** use FTP to read files: on the FTP server the
 incoming directories are local paths (e.g. `/srv/ftp/incoming`).
-It polls them, and for each manifest it finds:
+It polls them, and for each manifest it finds — one manifest is one
+batch, however many files it lists:
 
-1. **Claim** — atomic move of data file + manifest from
+1. **Claim** — atomic move of the data files + manifest from
    `incoming/<job>/` to `processing/<run_id>/`. A second watcher
-   or a restart can never claim the same file twice.
-2. **Verify** — re-compute SHA-256 + size against the manifest.
-   Mismatch → `quarantine/<run_id>/`, ledger QUARANTINED.
+   or a restart can never claim the same files twice.
+2. **Verify** — re-compute SHA-256 + size of every file against the
+   manifest. Mismatch → `quarantine/<run_id>/`, ledger QUARANTINED.
    Nothing is processed, nothing is published.
 3. **Dedup** — ledger claim on the idempotency key. Already
    published → `duplicate/`, no re-run, no re-publish. The ledger
-   stays PUBLISHED so reconcile still checks the share copy.
+   stays PUBLISHED so reconcile still checks the share copies.
 4. **Route** — job comes from the manifest / incoming directory.
    Unknown job → `failed/<run_id>/` + `reason.txt`. Never guess
    a procedure.
-5. **Process** — run the job's registered procedure in the
-   workdir. It writes a *new* output file; the input is never
-   edited.
-6. **Verify output** — exists, non-empty, parses if CSV.
-7. **Publish** — copy output + final manifest to the share drive
-   via `.part` + rename, then **read back** the share copy and
-   compare SHA-256 + size. Only then is the run PUBLISHED.
-8. **Archive** — the verified input + manifest move to
+5. **Process** — run the job's registered procedure on **each** file
+   in the batch, in the workdir. It writes *new* output files; the
+   inputs are never edited. The run only completes when all files
+   are processed.
+6. **Verify output** — each output exists, non-empty, parses if CSV.
+7. **Publish** — copy every output + the final manifest to the share
+   drive via `.part` + rename, then **read back** each share copy
+   and compare SHA-256 + size. Only then is the run PUBLISHED.
+8. **Archive** — the verified inputs + manifest move to
    `done/<run_id>/`.
 
 **Reverse flow** (same loop, same program): it watches
 `<share>/upload-requests/<job>/` for new files. A file is only
 picked once stable (not a `.part`, mtime at least
-`min_age_seconds` old). It seals it with a manifest, copies data
-+ manifest to `<ftp>/outgoing/<job>/` (`.part` + rename,
-manifest last), verifies the copy, and only then moves the SMB
-original to `<share>/upload-archive/<job>/`. Enable per job with
+`min_age_seconds` old). One scan stages **one batch per job**:
+every stable file currently in the job's requests dir is one
+job, sealed under a single run_id with one manifest listing all
+the files -- a job only completes when all its files are uploaded
+to the website together. It copies the data files + manifest to
+`<ftp>/outgoing/<job>/` (`.part` + rename, manifest last),
+verifies the copies, and only then moves the SMB originals to
+`<share>/upload-archive/<job>/`. A file already staged in an
+earlier batch (same job + name + hash) is archived as a duplicate
+instead of being staged again. Enable per job with
 `"outbound": true` plus the `outbound` section in the config.
 
 **Reconciliation:** `fileflow-watcher --reconcile` checks every
@@ -63,17 +71,38 @@ PUBLISHED run still has its file on the share. Run it daily.
 
 ```
 src/fileflow_watcher/
-  common.py      sha256, manifest, atomic .part+rename
-  ledger.py      SQLite run ledger + idempotency keys + states
-  procedures.py  procedure registry + built-ins
-                 (rename-only, normalize-csv, uppercase-headers-csv)
-  watcher.py     claim -> verify -> route -> run -> publish
-                 + SMB upload-requests -> outgoing
+  domain/          pure business rules (stdlib only, no I/O)
+    entities.py    Manifest, ManifestFile, RunRecord, run states
+    ports.py       RunRepository / Procedure
+    integrity.py   manifest verification, rename patterns, idempotency key
+    procedures.py  procedure registry + built-ins
+                   (rename-only, normalize-csv, uppercase-headers-csv)
+  application/     use cases, written only against domain ports
+    process.py     ProcessIncomingUseCase (claim -> verify -> process -> publish)
+    outbound.py    StageOutboundUseCase (SMB upload-requests -> outgoing)
+    scan.py        ScanUseCase (one polling pass: incoming + outbound)
+    reconcile.py   ReconcileUseCase (PUBLISHED runs vs share)
+  infrastructure/  the outside world, behind the ports
+    filesystem.py  sha256, manifest I/O, atomic .part+rename
+    persistence.py SQLAlchemy run ledger (RunRepository) + Alembic model
+  adapters/
+    cli.py         composition root: builds use cases from config
 config/
   watcher.example.json   copy to watcher.json and fill in
   procedures_local.py    add your business procedures here
 tests/test_watcher.py    forward + reverse tests (no agent code)
 ```
+
+## Architecture
+
+Clean architecture: `domain` <- `application` <- `infrastructure` <-
+`adapters`. The dependency rule runs inward only -- the domain never
+imports SQLAlchemy or the filesystem; a use case only talks to ports,
+so the ledger can move to Postgres without touching a use case.
+`adapters/cli.py` is the composition root: the only place that wires
+concrete infrastructure into the use cases. The full layer diagram,
+module map, and extension guide are in the architecture technical
+document (FileFlow Agent & Watcher -- Clean Architecture, 2026-11-17).
 
 ## Install
 
@@ -144,12 +173,40 @@ Share:      /mnt/share/<share_dir>/<output> + <output>.manifest.json
             /mnt/share/upload-archive/<job>/  (reverse flow: picked originals)
 ```
 
+
+## Database migrations (Alembic)
+
+The ledger database is managed with Alembic — that's the library
+you were thinking of. The schema lives in `migrations/versions/`
+(`001_initial.py` creates the `runs` table); the model in
+`infrastructure/persistence.py` is the source for autogeneration.
+
+```bash
+# New database (run from the project root, with the ledger path set):
+FILEFLOW_LEDGER_DB=/var/lib/fileflow-watcher/watcher.db alembic upgrade head
+
+# Existing database that already has the runs table: mark it current
+# instead of rebuilding it:
+FILEFLOW_LEDGER_DB=/var/lib/fileflow-watcher/watcher.db alembic stamp head
+
+# A future schema change: edit the model in infrastructure/persistence.py, then:
+alembic revision --autogenerate -m "add <what>"
+alembic upgrade head
+```
+
+`FILEFLOW_DB_URL` (a full SQLAlchemy URL) works instead of
+`FILEFLOW_LEDGER_DB` if you need it. The ledger's `create_all`
+is still there as a first-run safety net, but schema changes go
+through Alembic revisions — never by editing the table by hand.
+
 ## Tests
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/ -q
-```
+ruff check src tests
+ruff format --check src tests
+``````
 
 4 tests, all with local folders (no agent, no server needed):
 forward publish to the share, corrupt file quarantined, duplicate

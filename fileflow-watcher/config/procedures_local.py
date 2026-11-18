@@ -2,7 +2,7 @@
 
 Copy this file next to the watcher config, add your own procedures,
 and set "procedures_module": "procedures_local" in watcher.json.
-The watcher imports it on start; no change to watcher.py is needed.
+The watcher imports it on start; no change to the watcher itself is needed.
 
 A procedure: (input_path, workdir, ctx) -> output_path.
   * read input_path, write a NEW file into workdir, return it;
@@ -12,7 +12,7 @@ A procedure: (input_path, workdir, ctx) -> output_path.
 """
 from pathlib import Path
 
-from fileflow_watcher.procedures import register_procedure
+from fileflow_watcher.domain.procedures import register_procedure
 
 
 def reformat_invoices(input_path: Path, workdir: Path, ctx: dict) -> Path:
