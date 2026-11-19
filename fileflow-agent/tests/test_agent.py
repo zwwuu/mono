@@ -14,12 +14,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from fileflow_contract import file_entry, verify_files, write_manifest
+
 from fileflow_agent.adapters.cli import build_download_use_case, build_pickup_use_case
-from fileflow_agent.infrastructure.filesystem import (
-    file_entry,
-    verify_files,
-    write_manifest,
-)
 
 RECEIVED: list[bytes] = []
 

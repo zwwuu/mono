@@ -16,9 +16,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..domain.entities import Manifest
+from fileflow_contract import Manifest, read_manifest, verify_files
+
 from ..domain.ports import RunRepository, Transport, WebsiteUploader
-from ..infrastructure.filesystem import log, read_manifest, verify_files
+from ..infrastructure.filesystem import log
 
 
 class PickupUseCase:

@@ -102,6 +102,7 @@ Architecture, 2026-11-17).
 ## Install
 
 ```bash
+pip install -e ../fileflow-contract   # the shared manifest contract, once
 pip install -e .
 # SFTP transport only:
 pip install -e ".[sftp]"

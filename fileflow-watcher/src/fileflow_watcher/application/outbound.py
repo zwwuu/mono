@@ -33,19 +33,21 @@ from __future__ import annotations
 import time
 from pathlib import Path
 
-from ..domain.entities import MANIFEST_VERSION, Manifest, ManifestFile
-from ..domain.integrity import idempotency_key, new_run_id, utcnow_iso
-from ..domain.ports import RunRepository
-from ..infrastructure.filesystem import (
-    PART_SUFFIX,
-    atomic_move,
-    atomic_publish,
+from fileflow_contract import (
+    MANIFEST_VERSION,
+    Manifest,
+    ManifestFile,
     file_entry,
-    log,
+    idempotency_key,
+    new_run_id,
     sha256_file,
+    utcnow_iso,
     verify_files,
     write_manifest,
 )
+
+from ..domain.ports import RunRepository
+from ..infrastructure.filesystem import PART_SUFFIX, atomic_move, atomic_publish, log
 
 
 class StageOutboundUseCase:

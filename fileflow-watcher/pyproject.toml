@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fileflow-watcher"
-version = "2.0.0"
+version = "2.1.0"
 description = "FileFlow Watcher (FTP server): claim, verify, route, run business procedures, publish to the share drive; also stage share-drive files into outgoing/ for the agent to upload to the website."
 requires-python = ">=3.10"
-dependencies = ["sqlalchemy>=2.0", "alembic>=1.13"]
+dependencies = ["fileflow-contract>=1.0", "sqlalchemy>=2.0", "alembic>=1.13"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]

@@ -12,8 +12,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
+from fileflow_contract import file_entry, write_manifest
+
 from fileflow_watcher.adapters.cli import build_reconcile_use_case, build_scan_use_case
-from fileflow_watcher.infrastructure.filesystem import file_entry, write_manifest
 
 
 def _scan_once(cfg: dict) -> dict[str, int]:

@@ -12,9 +12,10 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ..domain.entities import Manifest
+from fileflow_contract import Manifest, read_manifest
+
 from ..domain.ports import RunRepository
-from ..infrastructure.filesystem import log, read_manifest
+from ..infrastructure.filesystem import log
 from .outbound import StageOutboundUseCase
 from .process import ProcessIncomingUseCase
 

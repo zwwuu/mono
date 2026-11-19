@@ -41,22 +41,22 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
-from ..domain.entities import MANIFEST_VERSION, Manifest, ManifestFile
-from ..domain.integrity import (
+from fileflow_contract import (
+    MANIFEST_VERSION,
+    Manifest,
+    ManifestFile,
+    file_entry,
     idempotency_key,
     new_run_id,
-    render_name,
-    utcnow_iso,
-)
-from ..domain.ports import RunRepository, Source, Transport
-from ..domain.procedures import get_procedure
-from ..infrastructure.filesystem import (
-    file_entry,
-    log,
-    read_csv_rows,
     sha256_file,
+    utcnow_iso,
     write_manifest,
 )
+
+from ..domain.integrity import render_name
+from ..domain.ports import RunRepository, Source, Transport
+from ..domain.procedures import get_procedure
+from ..infrastructure.filesystem import log, read_csv_rows
 
 
 def validate_input(path: Path, job_cfg: dict) -> None:

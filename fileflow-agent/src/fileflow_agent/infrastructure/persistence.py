@@ -12,12 +12,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from fileflow_contract import utcnow_iso
 from sqlalchemy import String, Text, create_engine
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from ..domain.entities import STATES, RunRecord
-from ..domain.integrity import utcnow_iso
 
 
 class Base(DeclarativeBase):

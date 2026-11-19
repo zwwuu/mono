@@ -107,6 +107,7 @@ document (FileFlow Agent & Watcher -- Clean Architecture, 2026-11-17).
 ## Install
 
 ```bash
+pip install -e ../fileflow-contract   # the shared manifest contract, once
 pip install -e .
 ```
 
