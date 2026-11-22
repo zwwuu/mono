@@ -45,6 +45,7 @@ from fileflow_contract import (
     MANIFEST_VERSION,
     Manifest,
     ManifestFile,
+    file_already_recorded,
     file_entry,
     idempotency_key,
     new_run_id,
@@ -84,18 +85,6 @@ class DownloadAndUploadUseCase:
         self.repository = repository
         self.procedure_lookup = procedure_lookup
 
-    def _file_already_processed(self, job: str, name: str, sha: str) -> bool:
-        """True if this exact file (job + name + hash) went up in an
-        earlier completed run. Only UPLOADED runs count: a file from
-        a failed run is fresh and retries."""
-        for record in self.repository.list_by_state("UPLOADED"):
-            if record.job != job:
-                continue
-            for f in record.detail.get("files", []):
-                if f.get("name") == name and f.get("sha256") == sha:
-                    return True
-        return False
-
     def run(self) -> dict:
         cfg = self.cfg
         job = cfg["job"]
@@ -114,7 +103,11 @@ class DownloadAndUploadUseCase:
             skipped: list[str] = []
             for path in downloaded:
                 input_sha = sha256_file(path)
-                if self._file_already_processed(job, path.name, input_sha):
+                # Only UPLOADED runs count: a file from a failed run
+                # is fresh and retries.
+                if file_already_recorded(
+                    self.repository.list_by_state("UPLOADED"), job, path.name, input_sha
+                ):
                     log.info("run %s: %s already processed, skipped", run_id, path.name)
                     skipped.append(path.name)
                     continue
@@ -143,7 +136,7 @@ class DownloadAndUploadUseCase:
             proc = self.procedure_lookup(proc_name)
             outputs: list[tuple[Path, str]] = []
             for path, _ in fresh:
-                formatted = proc["fn"](path, staging, {"job": job, "run_id": run_id})
+                formatted = proc.fn(path, staging, {"job": job, "run_id": run_id})
                 stem, ext = (
                     formatted.name.rsplit(".", 1) if "." in formatted.name else (formatted.name, "")
                 )
@@ -174,7 +167,7 @@ class DownloadAndUploadUseCase:
                     or cfg["source"].get("path")
                     or cfg["source"].get("dir"),
                     "agent_procedure": proc_name,
-                    "agent_procedure_version": proc["version"],
+                    "agent_procedure_version": proc.version,
                     # Input hashes are provenance / idempotency only: the
                     # input files themselves are NOT uploaded, so they must
                     # not appear in "files" -- the watcher verifies only the

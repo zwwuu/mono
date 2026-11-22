@@ -22,7 +22,9 @@ Transports:
 from __future__ import annotations
 
 import ftplib
+import os
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .filesystem import PART_SUFFIX, log
@@ -48,6 +50,12 @@ class Transport:
     def remote_size(self, remote_dir: str, remote_name: str) -> int | None:
         raise NotImplementedError
 
+    def remote_mtime(self, remote_dir: str, remote_name: str) -> float | None:
+        """mtime of a remote file as epoch seconds. The default is
+        None (unknown): a transport that cannot report mtimes leaves
+        the source to treat every file as stable."""
+        return None
+
     def close(self) -> None:
         pass
 
@@ -71,11 +79,30 @@ class Transport:
     def _verify_size(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
         expected = Path(local_path).stat().st_size
         actual = self.remote_size(remote_dir, remote_name)
-        if actual is not None and actual != expected:
+        if actual is None:
+            # The transport could not stat the remote file (e.g. an FTP
+            # server without SIZE support). That is not proof it landed,
+            # so say so loudly instead of passing silently.
+            log.warning("could not verify size of %s after upload", remote_name)
+            return
+        if actual != expected:
             raise OSError(
                 f"size mismatch after upload: {remote_name} "
                 f"expected {expected}, remote has {actual}"
             )
+
+
+def _download_local(local_path: str | Path, write_tmp) -> Path:
+    """Write a downloaded file via .part + rename; never a partial file.
+
+    ``write_tmp`` fills the .part file; the rename is what publishes it.
+    """
+    local_path = Path(local_path)
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = local_path.with_name(local_path.name + PART_SUFFIX)
+    write_tmp(tmp)
+    tmp.replace(local_path)
+    return local_path
 
 
 class LocalTransport(Transport):
@@ -98,11 +125,7 @@ class LocalTransport(Transport):
 
     def download(self, remote_dir: str, remote_name: str, local_path: str | Path) -> None:
         src = self._remote(remote_dir, remote_name)
-        local_path = Path(local_path)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = local_path.with_name(local_path.name + PART_SUFFIX)
-        shutil.copyfile(src, tmp)
-        tmp.replace(local_path)
+        _download_local(local_path, lambda tmp: shutil.copyfile(src, tmp))
 
     def list_names(self, remote_dir: str) -> list[str]:
         d = self.root / remote_dir
@@ -114,6 +137,10 @@ class LocalTransport(Transport):
     def remote_size(self, remote_dir: str, remote_name: str) -> int | None:
         p = self._remote(remote_dir, remote_name)
         return p.stat().st_size if p.exists() else None
+
+    def remote_mtime(self, remote_dir: str, remote_name: str) -> float | None:
+        p = self._remote(remote_dir, remote_name)
+        return p.stat().st_mtime if p.exists() else None
 
 
 class FtpTransport(Transport):
@@ -134,13 +161,13 @@ class FtpTransport(Transport):
         self.ftp.rename(part, remote_name)
 
     def download(self, remote_dir: str, remote_name: str, local_path: str | Path) -> None:
-        local_path = Path(local_path)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = local_path.with_name(local_path.name + PART_SUFFIX)
         self.ftp.cwd(remote_dir)
-        with open(tmp, "wb") as f:
-            self.ftp.retrbinary(f"RETR {remote_name}", f.write)
-        tmp.replace(local_path)
+
+        def _retr(tmp: Path) -> None:
+            with open(tmp, "wb") as f:
+                self.ftp.retrbinary(f"RETR {remote_name}", f.write)
+
+        _download_local(local_path, _retr)
 
     def list_names(self, remote_dir: str) -> list[str]:
         try:
@@ -161,6 +188,20 @@ class FtpTransport(Transport):
             self.ftp.cwd(remote_dir)
             return self.ftp.size(remote_name)
         except (ftplib.error_perm, OSError) as _:
+            return None
+
+    def remote_mtime(self, remote_dir: str, remote_name: str) -> float | None:
+        """MDTM, the standard FTP mtime command (UTC, YYYYMMDDHHMMSS).
+        None when the server does not support it."""
+        try:
+            self.ftp.cwd(remote_dir)
+            resp = self.ftp.sendcmd(f"MDTM {remote_name}")
+        except (ftplib.error_perm, OSError) as _:
+            return None
+        try:
+            stamp = resp.split(None, 1)[1].strip()
+            return datetime.strptime(stamp, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc).timestamp()
+        except (IndexError, ValueError) as _:
             return None
 
     def close(self) -> None:
@@ -208,11 +249,9 @@ class SftpTransport(Transport):
         self.sftp.rename(part, final)
 
     def download(self, remote_dir: str, remote_name: str, local_path: str | Path) -> None:
-        local_path = Path(local_path)
-        local_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = local_path.with_name(local_path.name + PART_SUFFIX)
-        self.sftp.get(f"{remote_dir}/{remote_name}", str(tmp))
-        tmp.replace(local_path)
+        _download_local(
+            local_path, lambda tmp: self.sftp.get(f"{remote_dir}/{remote_name}", str(tmp))
+        )
 
     def list_names(self, remote_dir: str) -> list[str]:
         try:
@@ -232,6 +271,12 @@ class SftpTransport(Transport):
         except OSError:
             return None
 
+    def remote_mtime(self, remote_dir: str, remote_name: str) -> float | None:
+        try:
+            return self.sftp.stat(f"{remote_dir}/{remote_name}").st_mtime
+        except OSError:
+            return None
+
     def close(self) -> None:
         try:
             self.sftp.close()
@@ -247,8 +292,6 @@ def build_transport(cfg: dict) -> Transport:
     Password / key come from env vars, never from the config file:
     FILEFLOW_FTP_PASSWORD / FILEFLOW_SFTP_KEY_FILE.
     """
-    import os
-
     kind = cfg.get("transport", "local")
     if kind == "local":
         return LocalTransport(cfg["root"])

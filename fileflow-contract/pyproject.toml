@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fileflow-contract"
-version = "1.0.0"
+version = "1.1.0"
 description = "FileFlow manifest contract: the transfer manifest format, the run idempotency key, and SHA-256 verification. Stdlib only, so any project can depend on it."
 requires-python = ">=3.10"
 dependencies = []

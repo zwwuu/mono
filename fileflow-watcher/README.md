@@ -3,11 +3,10 @@
 Runs on the FTP server, the only machine that can see the share
 drive. One of two projects — the other is **fileflow-agent**,
 which runs on the dedicated Ethernet PC. The two projects share
-no code: each is self-contained and is deployed and updated on
-its own machine. The only contract between them is the manifest
-format (`domain/entities.py`: `MANIFEST_VERSION`) and the idempotency key
-(`job|run_id|input-sha256`). Change either in one project,
-change it in the other, and bump `MANIFEST_VERSION`.
+one library, **fileflow-contract** (the manifest format, run
+identity, and SHA-256 verification), installed once per machine;
+everything else is each project's own. Change the manifest format
+in the contract package and bump `MANIFEST_VERSION`.
 
 ```
 website ──► Ethernet PC ──► FTP server (Watcher, this machine) ──► share drive

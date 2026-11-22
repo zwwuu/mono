@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import json
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 from ..application.download import DownloadAndUploadUseCase
@@ -50,6 +51,18 @@ def build_pickup_use_case(cfg: dict):
     return use_case, transport, repository
 
 
+@contextmanager
+def _opened(build):
+    """Build a use case, yield it, and always close its transport
+    and repository -- the caller owns neither after this."""
+    use_case, transport, repository = build()
+    try:
+        yield use_case
+    finally:
+        transport.close()
+        repository.close()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="FileFlow Agent (Ethernet PC)")
     ap.add_argument("--config", required=True)
@@ -69,21 +82,13 @@ def main(argv: list[str] | None = None) -> int:
         failed = False
         try:
             if args.mode in ("download", "both"):
-                use_case, transport, repository = build_download_use_case(cfg)
-                try:
+                with _opened(lambda: build_download_use_case(cfg)) as use_case:
                     use_case.run()
-                finally:
-                    transport.close()
-                    repository.close()
             if args.mode in ("pickup", "both"):
-                use_case, transport, repository = build_pickup_use_case(cfg)
-                try:
+                with _opened(lambda: build_pickup_use_case(cfg)) as use_case:
                     counts = use_case.run()
                     if counts:
                         log.info("pickup: %s", counts)
-                finally:
-                    transport.close()
-                    repository.close()
         except Exception as e:  # noqa: BLE001 -- a failed run must not kill the loop
             log.error("agent run failed: %s", e)
             failed = True

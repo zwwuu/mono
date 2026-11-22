@@ -8,17 +8,17 @@ agent to pick up and upload to the website.
 
 Clean architecture, four layers (dependency rule: outer layers depend
 on inner ones, never the reverse):
-  domain/         entities, ports, pure integrity rules, procedures
+  domain/         entities, ports, procedures
   application/    use cases: process-incoming, stage-outbound, scan,
                   reconcile
   infrastructure/ filesystem, SQLAlchemy ledger
   adapters/       CLI + composition root (builds use cases from config)
 
-Self-contained: it shares no code with the agent project. The only
-contract between the two projects is the manifest format
-(domain/entities.py: MANIFEST_VERSION) and the idempotency key
-(job|run_id|input-sha256). Change either in one project, change it
-in the other, and bump MANIFEST_VERSION.
+Shares one library with the agent project: fileflow-contract
+(the manifest format, run identity, and SHA-256 verification).
+Everything else is this project's own; the two machines still
+deploy independently apart from that one install. Change the
+manifest format in the contract package and bump MANIFEST_VERSION.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.2.0"

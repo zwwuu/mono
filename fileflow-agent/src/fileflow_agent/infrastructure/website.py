@@ -21,7 +21,10 @@ import urllib.request
 import uuid
 from pathlib import Path
 
-from .filesystem import log, sha256_file
+from fileflow_contract import sha256_file
+
+from .. import __version__
+from .filesystem import log
 
 
 class WebsiteUploader:
@@ -68,7 +71,7 @@ class WebsiteUploader:
         body.extend(f"--{boundary}--\r\n".encode())
 
         headers = {
-            "User-Agent": "FileFlow-Agent/1.0",
+            "User-Agent": f"FileFlow-Agent/{__version__}",
             "Content-Type": f"multipart/form-data; boundary={boundary}",
         }
         if self.auth_env and os.environ.get(self.auth_env):
@@ -99,23 +102,19 @@ class WebsiteUploader:
                         f"website reported sha256 {remote_sha} for {file_path.name}, "
                         f"expected {file_sha}"
                     )
-                if "size" in reply and int(reply["size"]) != file_path.stat().st_size:
-                    raise OSError(f"website reported size {reply['size']} for {file_path.name}")
+                if "size" in reply:
+                    try:
+                        remote_size = int(reply["size"])
+                    except (TypeError, ValueError):
+                        raise OSError(
+                            f"website reported unparseable size {reply['size']!r} "
+                            f"for {file_path.name}"
+                        ) from None
+                    if remote_size != file_path.stat().st_size:
+                        raise OSError(f"website reported size {reply['size']} for {file_path.name}")
         log.info(
             "uploaded %d file(s) to website (run %s, HTTP %s)",
             len(file_paths),
             run_id,
             status,
         )
-
-
-def upload_to_website(file_path: Path, pickup_cfg: dict, *, run_id: str, job: str) -> None:
-    """POST a file to the website as multipart/form-data (stdlib only)."""
-    WebsiteUploader(pickup_cfg).upload(file_path, run_id=run_id, job=job)
-
-
-def upload_many_to_website(
-    file_paths: list[Path], pickup_cfg: dict, *, run_id: str, job: str
-) -> None:
-    """POST a batch of files to the website in one multipart request."""
-    WebsiteUploader(pickup_cfg).upload_many(file_paths, run_id=run_id, job=job)

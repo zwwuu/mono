@@ -41,7 +41,6 @@ from fileflow_contract import (
     ManifestFile,
     file_entry,
     read_manifest,
-    sha256_file,
     utcnow_iso,
     verify_files,
     write_manifest,
@@ -66,20 +65,29 @@ class ProcessIncomingUseCase:
         self.ftp_root = Path(cfg["ftp_root"])
         self.share_root = Path(cfg["share_root"])
 
-    # -- dead-letter helpers -------------------------------------------
-    def _quarantine(self, run_dir: Path, run_id: str, reason: str) -> None:
-        dest = self.ftp_root / "quarantine" / run_id
+    # -- dead-letter helper --------------------------------------------
+    def _dead_letter(
+        self, run_dir: Path, run_id: str, reason: str, state: str, subdir: str
+    ) -> None:
+        """Move a run out of processing/ into quarantine/ or failed/,
+        attach the reason, and record the final state."""
+        dest = self.ftp_root / subdir / run_id
         move_tree(run_dir, dest)
         (dest / "reason.txt").write_text(reason, encoding="utf-8")
-        self.repository.set_state(run_id, "QUARANTINED", reason=reason)
-        log.error("run %s QUARANTINED: %s", run_id, reason)
+        self.repository.set_state(run_id, state, reason=reason)
+        log.error("run %s %s: %s", run_id, state, reason)
 
-    def _fail(self, run_dir: Path, run_id: str, reason: str) -> None:
-        dest = self.ftp_root / "failed" / run_id
-        move_tree(run_dir, dest)
-        (dest / "reason.txt").write_text(reason, encoding="utf-8")
-        self.repository.set_state(run_id, "FAILED", reason=reason)
-        log.error("run %s FAILED: %s", run_id, reason)
+    def _move_into_processing(
+        self, manifest_path: Path, data_names: list[str], run_id: str
+    ) -> Path:
+        """Atomic-claim the data files + manifest into processing/<run_id>/."""
+        run_dir = self.ftp_root / "processing" / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        for name in [*data_names, manifest_path.name]:
+            src = manifest_path.parent / name
+            if src.exists():
+                atomic_move(src, run_dir / name)
+        return run_dir
 
     # -- the use case ----------------------------------------------------
     def process(self, manifest_path: Path) -> str:
@@ -92,28 +100,20 @@ class ProcessIncomingUseCase:
         if job_cfg is None:
             # Unknown job: do not guess. Claim it so it is not re-scanned,
             # then dead-letter it with the reason attached.
-            run_dir = self.ftp_root / "processing" / run_id
-            run_dir.mkdir(parents=True, exist_ok=True)
-            for name in [*data_names, manifest_path.name]:
-                if name and (manifest_path.parent / name).exists():
-                    atomic_move(manifest_path.parent / name, run_dir / name)
+            run_dir = self._move_into_processing(manifest_path, data_names, run_id)
             self.repository.claim(
                 run_id=run_id,
                 job=job,
                 idempotency_key=manifest.idempotency_key,
             )
-            self._fail(run_dir, run_id, f"unknown job {job!r}")
+            self._dead_letter(run_dir, run_id, f"unknown job {job!r}", "FAILED", "failed")
             return "FAILED"
 
         # 1. CLAIM -- atomic move into processing/<run_id>/
         run_dir = self.ftp_root / "processing" / run_id
         if run_dir.exists():
             return "RECEIVED"  # already claimed by another pass; leave it
-        run_dir.mkdir(parents=True, exist_ok=True)
-        for name in [*data_names, manifest_path.name]:
-            src = manifest_path.parent / name
-            if src.exists():
-                atomic_move(src, run_dir / name)
+        run_dir = self._move_into_processing(manifest_path, data_names, run_id)
         is_new = self.repository.claim(
             run_id=run_id,
             job=job,
@@ -123,7 +123,7 @@ class ProcessIncomingUseCase:
         # 2. VERIFY -- manifest vs the bytes that actually arrived
         problems = verify_files(run_dir, manifest)
         if problems:
-            self._quarantine(run_dir, run_id, "; ".join(problems))
+            self._dead_letter(run_dir, run_id, "; ".join(problems), "QUARANTINED", "quarantine")
             return "QUARANTINED"
 
         # 3. DEDUP -- after verification, but BEFORE any set_state, or a
@@ -151,14 +151,16 @@ class ProcessIncomingUseCase:
         outputs: list[Path] = []
         try:
             for data_name in data_names:
-                output = proc["fn"](run_dir / data_name, workdir, {"job": job, "run_id": run_id})
+                output = proc.fn(run_dir / data_name, workdir, {"job": job, "run_id": run_id})
                 if not output.exists() or output.stat().st_size == 0:
                     raise ValueError(f"procedure produced no output: {output.name}")
                 if job_cfg.get("expect_csv"):
                     read_csv_rows(output)  # raises ValueError when unparseable
                 outputs.append(output)
         except Exception as e:  # noqa: BLE001 -- a procedure failure is a dead-letter
-            self._fail(run_dir, run_id, f"procedure {job_cfg['procedure']}: {e}")
+            self._dead_letter(
+                run_dir, run_id, f"procedure {job_cfg['procedure']}: {e}", "FAILED", "failed"
+            )
             return "FAILED"
         self.repository.set_state(run_id, "PROCESSED")
         log.info(
@@ -181,24 +183,23 @@ class ProcessIncomingUseCase:
             extra={
                 "source_run": manifest.to_dict(),
                 "procedure": job_cfg["procedure"],
-                "procedure_version": proc["version"],
+                "procedure_version": proc.version,
             },
         )
         published: list[Path] = []
         try:
-            for output, entry in zip(outputs, final_manifest.files, strict=True):
+            for output in outputs:
                 out_name = job_cfg.get("output_pattern", "{name}").format(
                     name=output.name, run_id=run_id, job=job
                 )
+                # atomic_publish copies via .part + rename and verifies
+                # the share copy by read-back hash as it lands.
                 published_path = atomic_publish(output, share_dir / out_name)
-                # read-back: the share copy must hash exactly like the output
-                if sha256_file(published_path) != entry.sha256:
-                    raise OSError(f"read-back mismatch on share for {out_name}")
                 published.append(published_path)
             manifest_name = f"{run_id}.manifest.json"
             write_manifest(share_dir / manifest_name, final_manifest)
         except Exception as e:  # noqa: BLE001 -- a publish failure is a dead-letter
-            self._fail(run_dir, run_id, f"publish to share: {e}")
+            self._dead_letter(run_dir, run_id, f"publish to share: {e}", "FAILED", "failed")
             return "FAILED"
 
         # 6. ARCHIVE the verified inputs on the FTP server

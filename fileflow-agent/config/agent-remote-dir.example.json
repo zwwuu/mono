@@ -1,0 +1,25 @@
+{
+  "agent_procedure": "normalize-csv",
+  "expect_csv": true,
+  "ftp": {
+    "host": "192.168.10.20",
+    "port": 22,
+    "transport": "sftp",
+    "username": "fileflow"
+  },
+  "job": "ftp-inbox",
+  "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "rename_pattern": "{date}_{name}{ext}",
+  "source": {
+    "host": "192.168.10.30",
+    "min_age_seconds": 5,
+    "password_env": "APP_FTP_PASSWORD",
+    "pattern": "*.csv",
+    "port": 21,
+    "remote_dir": "inbox",
+    "transport": "ftp",
+    "type": "remote-dir",
+    "username": "fileflow"
+  },
+  "staging_dir": "/var/lib/fileflow-agent/staging"
+}

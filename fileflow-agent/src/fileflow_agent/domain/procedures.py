@@ -26,19 +26,48 @@ from __future__ import annotations
 
 import csv
 import shutil
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
-REGISTRY: dict[str, dict] = {}
+ProcedureFn = Callable[[Path, Path, dict], Path]
 
 
-def register_procedure(name: str, version: str, fn) -> None:
-    REGISTRY[name] = {"version": version, "fn": fn}
+@dataclass(frozen=True)
+class Procedure:
+    name: str
+    version: str
+    fn: ProcedureFn
 
 
-def get_procedure(name: str) -> dict:
+REGISTRY: dict[str, Procedure] = {}
+
+
+def register_procedure(name: str, version: str, fn: ProcedureFn) -> None:
+    REGISTRY[name] = Procedure(name, version, fn)
+
+
+def get_procedure(name: str) -> Procedure:
     if name not in REGISTRY:
         raise ValueError(f"unknown procedure {name!r}; registered: {sorted(REGISTRY)}")
     return REGISTRY[name]
+
+
+# -- CSV helpers (shared by the built-ins) ------------------------------
+
+
+def _read_csv_rows(path: Path) -> list[list[str]]:
+    """Parse a CSV file. Raises ValueError when it has no rows at all."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        rows = list(csv.reader(f))
+    if not rows:
+        raise ValueError("empty CSV: no header row")
+    return rows
+
+
+def _write_csv_rows(path: Path, rows: list[list[str]]) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as f:
+        csv.writer(f).writerows(rows)
 
 
 # -- built-in procedures ------------------------------------------------
@@ -57,11 +86,7 @@ def normalize_csv(input_path: Path, workdir: Path, ctx: dict) -> Path:
     Fails loudly on a file that is not parseable CSV -- that is a
     correctness gate, not something to silently fix.
     """
-    out = workdir / input_path.name
-    with open(input_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
-    if not rows:
-        raise ValueError("empty CSV: no header row")
+    rows = _read_csv_rows(input_path)
     header = [c.strip() for c in rows[0]]
     if not any(header):
         raise ValueError("empty CSV header")
@@ -70,20 +95,16 @@ def normalize_csv(input_path: Path, workdir: Path, ctx: dict) -> Path:
         cells = [c.strip() for c in row]
         if any(cells):
             cleaned.append(cells)
-    with open(out, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerows(cleaned)
+    out = workdir / input_path.name
+    _write_csv_rows(out, cleaned)
     return out
 
 
 def uppercase_headers_csv(input_path: Path, workdir: Path, ctx: dict) -> Path:
-    out = workdir / input_path.name
-    with open(input_path, newline="", encoding="utf-8-sig") as f:
-        rows = list(csv.reader(f))
-    if not rows:
-        raise ValueError("empty CSV: no header row")
+    rows = _read_csv_rows(input_path)
     rows[0] = [c.strip().upper() for c in rows[0]]
-    with open(out, "w", newline="", encoding="utf-8") as f:
-        csv.writer(f).writerows(rows)
+    out = workdir / input_path.name
+    _write_csv_rows(out, rows)
     return out
 
 

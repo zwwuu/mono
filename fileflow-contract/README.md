@@ -12,6 +12,7 @@ depend on it.
 | `fileflow_contract.manifest` | `MANIFEST_VERSION`, `Manifest`, `ManifestFile`, atomic `read_manifest` / `write_manifest` |
 | `fileflow_contract.identity` | `new_run_id`, `idempotency_key`, `utcnow_iso` |
 | `fileflow_contract.verify` | `sha256_file`, `file_entry`, `check_manifest`, `verify_files` |
+| `fileflow_contract.tracking` | `file_already_recorded` — layer-2 idempotency: has this exact file (job + name + hash) already been recorded in a completed run? |
 
 Everything is also re-exported from `fileflow_contract` itself:
 

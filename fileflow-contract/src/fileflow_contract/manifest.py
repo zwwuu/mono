@@ -89,10 +89,6 @@ class Manifest:
             extra={k: v for k, v in d.items() if k not in known},
         )
 
-    def output_file(self) -> ManifestFile:
-        """The transferred data file (role == 'output')."""
-        return next(f for f in self.files if f.role == "output")
-
 
 def write_manifest(path: str | Path, manifest: dict | Manifest) -> None:
     """Write a manifest atomically: .part first, then rename."""

@@ -1,0 +1,24 @@
+{
+  "agent_procedure": "normalize-csv",
+  "expect_csv": true,
+  "ftp": {
+    "host": "192.168.10.20",
+    "port": 22,
+    "transport": "sftp",
+    "username": "fileflow"
+  },
+  "job": "smb-inbox",
+  "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "rename_pattern": "{date}_{name}{ext}",
+  "source": {
+    "min_age_seconds": 5,
+    "password_env": "FILEFLOW_SMB_PASSWORD",
+    "path": "daily",
+    "pattern": "*.csv",
+    "server": "fileserver",
+    "share": "reports",
+    "type": "smb",
+    "username": "fileflow"
+  },
+  "staging_dir": "/var/lib/fileflow-agent/staging"
+}

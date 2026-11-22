@@ -19,6 +19,25 @@ from fileflow_contract import (
 )
 
 
+def test_file_already_recorded(tmp_path: Path):
+    from fileflow_contract import file_already_recorded
+
+    class Record:
+        def __init__(self, job, files):
+            self.job = job
+            self.detail = {"files": files}
+
+    runs = [
+        Record("daily-report", [{"name": "a.csv", "sha256": "aaa"}]),
+        Record("other-job", [{"name": "a.csv", "sha256": "aaa"}]),
+    ]
+    assert file_already_recorded(runs, "daily-report", "a.csv", "aaa")
+    assert not file_already_recorded(runs, "daily-report", "a.csv", "bbb")
+    assert not file_already_recorded(runs, "daily-report", "b.csv", "aaa")
+    assert not file_already_recorded(runs, "other-job", "a.csv", "bbb")
+    assert not file_already_recorded([], "daily-report", "a.csv", "aaa")
+
+
 def test_manifest_round_trip(tmp_path: Path):
     m = Manifest(
         version=MANIFEST_VERSION,
@@ -35,7 +54,7 @@ def test_manifest_round_trip(tmp_path: Path):
     assert not list(tmp_path.glob("*.part"))  # atomic: no .part left behind
     back = Manifest.from_dict(read_manifest(path))
     assert back == m
-    assert back.output_file().name == "a.csv"
+    assert back.files[0].name == "a.csv"
     assert back.extra["agent_procedure"] == "rename-only"
 
 

@@ -9,7 +9,10 @@ things:
 - ``identity``: run identity -- ``new_run_id``, ``idempotency_key``,
   ``utcnow_iso``;
 - ``verify``: SHA-256 integrity -- ``sha256_file``, ``file_entry``,
-  ``check_manifest``, ``verify_files``.
+  ``check_manifest``, ``verify_files``;
+- ``tracking``: layer-2 idempotency -- ``file_already_recorded``,
+  whether this exact file (job + name + hash) is already in a
+  completed run's recorded file list.
 
 The manifest is a JSON document listing the transferred files with
 their SHA-256 + size, plus the run/job identity. ``extra`` carries
@@ -34,15 +37,17 @@ from __future__ import annotations
 
 from .identity import idempotency_key, new_run_id, utcnow_iso
 from .manifest import MANIFEST_VERSION, Manifest, ManifestFile, read_manifest, write_manifest
+from .tracking import file_already_recorded
 from .verify import check_manifest, file_entry, sha256_file, verify_files
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 
 __all__ = [
     "MANIFEST_VERSION",
     "Manifest",
     "ManifestFile",
     "check_manifest",
+    "file_already_recorded",
     "file_entry",
     "idempotency_key",
     "new_run_id",

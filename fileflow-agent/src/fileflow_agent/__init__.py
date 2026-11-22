@@ -13,11 +13,11 @@ on inner ones, never the reverse):
                   website uploader
   adapters/       CLI + composition root (builds use cases from config)
 
-Self-contained: it shares no code with the watcher project. The
-only contract between the two projects is the manifest format
-(domain/entities.py: MANIFEST_VERSION) and the idempotency key
-(job|run_id|input-sha256). Change either in one project, change it
-in the other, and bump MANIFEST_VERSION.
+Shares one library with the watcher project: fileflow-contract
+(the manifest format, run identity, and SHA-256 verification).
+Everything else is this project's own; the two machines still
+deploy independently apart from that one install. Change the
+manifest format in the contract package and bump MANIFEST_VERSION.
 """
 
-__version__ = "2.0.0"
+__version__ = "2.3.0"

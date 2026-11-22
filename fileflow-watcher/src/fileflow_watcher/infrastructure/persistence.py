@@ -13,11 +13,12 @@ import json
 from pathlib import Path
 
 from fileflow_contract import utcnow_iso
-from sqlalchemy import String, Text, create_engine
+from sqlalchemy import String, Text, create_engine, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column
 
 from ..domain.entities import STATES, RunRecord
+from .filesystem import log
 
 
 class Base(DeclarativeBase):
@@ -90,6 +91,7 @@ class SqlAlchemyRunRepository:
         with Session(self.engine) as session:
             row = session.get(Run, run_id)
             if row is None:
+                log.warning("set_state %s on unknown run %s; ignored", state, run_id)
                 return
             merged = json.loads(row.detail)
             merged.update(detail)
@@ -105,10 +107,12 @@ class SqlAlchemyRunRepository:
 
     def seen_key(self, idempotency_key: str) -> dict | None:
         with Session(self.engine) as session:
-            row = session.query(Run).filter_by(idempotency_key=idempotency_key).first()
+            row = session.scalar(select(Run).where(Run.idempotency_key == idempotency_key))
             return {"run_id": row.run_id, "state": row.state} if row else None
 
     def list_by_state(self, state: str) -> list[RunRecord]:
         with Session(self.engine) as session:
-            rows = session.query(Run).filter_by(state=state).order_by(Run.updated_at).all()
+            rows = session.scalars(
+                select(Run).where(Run.state == state).order_by(Run.updated_at)
+            ).all()
             return [r.to_record() for r in rows]

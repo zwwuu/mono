@@ -39,15 +39,18 @@ class ScanUseCase:
         counts: dict[str, int] = {}
         incoming = self.ftp_root / "incoming"
         for manifest_path in sorted(incoming.glob("*/*.manifest.json")):
-            # Ignore a manifest whose data file has not landed yet:
-            # the agent uploads data first, manifest last, so a lone
-            # manifest means the upload is still in flight.
+            # Ignore a manifest whose data files have not all landed yet:
+            # the agent uploads data first, manifest last, so a manifest
+            # with a missing file means the upload is still in flight.
+            # A manifest with no files at all is malformed; leave it for
+            # the operator instead of crashing the scan.
             try:
                 manifest = Manifest.from_dict(read_manifest(manifest_path))
-                data_name = manifest.output_file().name
             except (KeyError, ValueError, OSError, json.JSONDecodeError) as _:
                 continue
-            if not (manifest_path.parent / data_name).exists():
+            if not manifest.files or any(
+                not (manifest_path.parent / f.name).exists() for f in manifest.files
+            ):
                 continue
             try:
                 state = self.incoming.process(manifest_path)

@@ -33,12 +33,16 @@ def load_config(path: str | Path) -> dict:
     return cfg
 
 
+def _open_repository(cfg: dict) -> SqlAlchemyRunRepository:
+    return SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
+
+
 def build_scan_use_case(cfg: dict):
     """Compose one scan pass: (scan use case, repository).
 
     The caller owns the repository and must close it.
     """
-    repository = SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
+    repository = _open_repository(cfg)
     scan = ScanUseCase(
         cfg,
         repository=repository,
@@ -50,7 +54,7 @@ def build_scan_use_case(cfg: dict):
 
 def build_reconcile_use_case(cfg: dict):
     """Compose a reconcile run: (reconcile use case, repository)."""
-    repository = SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
+    repository = _open_repository(cfg)
     return ReconcileUseCase(cfg, repository=repository), repository
 
 

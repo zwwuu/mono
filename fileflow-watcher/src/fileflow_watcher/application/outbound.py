@@ -14,9 +14,9 @@ Files dropped later form a later batch. For each batch, in order:
      with SHA-256 + size, one idempotency key;
   2. copy every data file + the manifest to
      ``<ftp_root>/outgoing/<job>/`` via .part + rename, manifest
-     last (same trigger contract);
-  3. verify the outgoing copies hash exactly like the SMB files;
-  4. only then move the SMB originals to
+     last (same trigger contract). Each copy is verified by read-back
+     hash as it lands (``atomic_publish``);
+  3. only then move the SMB originals to
      ``<share_root>/<archive_dir>/<job>/`` -- the move is what
      stops them being picked twice. The archive stays on the share,
      which only this machine can see.
@@ -24,12 +24,14 @@ A file with the same job + name + hash already staged in a
 completed batch is a duplicate: it is archived without being
 staged a second time. (The check reads the completed batches'
 recorded file lists -- a batch is one ledger run, so there is no
-per-file row to look up.)
+per-file row to look up. The lookup itself lives in
+``fileflow_contract.tracking``.)
 Returns counts, e.g. {"OUTBOUND_READY": 1} for one batch.
 """
 
 from __future__ import annotations
 
+import itertools
 import time
 from pathlib import Path
 
@@ -37,12 +39,12 @@ from fileflow_contract import (
     MANIFEST_VERSION,
     Manifest,
     ManifestFile,
+    file_already_recorded,
     file_entry,
     idempotency_key,
     new_run_id,
     sha256_file,
     utcnow_iso,
-    verify_files,
     write_manifest,
 )
 
@@ -57,18 +59,11 @@ class StageOutboundUseCase:
         self.ftp_root = Path(cfg["ftp_root"])
         self.share_root = Path(cfg["share_root"])
 
-    def _file_already_staged(self, job: str, name: str, sha: str) -> bool:
-        """True if this exact file (job + name + hash) is already in a
-        completed outbound batch. A failed batch is not completed, so
-        its files stage again on the next scan."""
-        for state in ("OUTBOUND_READY", "UPLOADED_TO_WEBSITE"):
-            for record in self.repository.list_by_state(state):
-                if record.job != job:
-                    continue
-                for f in record.detail.get("files", []):
-                    if f.get("name") == name and f.get("sha256") == sha:
-                        return True
-        return False
+    def _archive(self, src: Path, archive_dir: Path, job: str) -> Path:
+        """Move a staged SMB original into the per-job archive dir."""
+        dest = archive_dir / job / src.name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        return atomic_move(src, dest)
 
     def run(self) -> dict[str, int]:
         outbound_cfg = self.cfg.get("outbound")
@@ -101,13 +96,20 @@ class StageOutboundUseCase:
             if not stable:
                 continue
             # Split off files already staged in an earlier batch.
+            # Only completed batches count: a file from a failed batch
+            # stages again on the next scan. Read the completed runs
+            # once -- the list is re-checked for every file in the batch.
+            completed = list(
+                itertools.chain(
+                    self.repository.list_by_state("OUTBOUND_READY"),
+                    self.repository.list_by_state("UPLOADED_TO_WEBSITE"),
+                )
+            )
             fresh: list[tuple[Path, str]] = []
             for src in stable:
                 input_sha = sha256_file(src)
-                if self._file_already_staged(job, src.name, input_sha):
-                    dest = archive_dir / job / src.name
-                    dest.parent.mkdir(parents=True, exist_ok=True)
-                    atomic_move(src, dest)
+                if file_already_recorded(completed, job, src.name, input_sha):
+                    self._archive(src, archive_dir, job)
                     counts["DUPLICATE"] = counts.get("DUPLICATE", 0) + 1
                     log.warning("outbound %s duplicate, archived without re-staging", src.name)
                 else:
@@ -139,16 +141,17 @@ class StageOutboundUseCase:
             )
             out_dir = self.ftp_root / "outgoing" / job
             out_dir.mkdir(parents=True, exist_ok=True)
-            # Copy every data file first, manifest last, both via .part + rename.
-            for src, _ in fresh:
-                atomic_publish(src, out_dir / src.name)
-            write_manifest(out_dir / f"{run_id}.manifest.json", manifest)
-            # Verify the outgoing copies before touching the SMB originals.
-            problems = verify_files(out_dir, manifest)
-            if problems:
-                self.repository.set_state(run_id, "FAILED", reason="; ".join(problems))
+            # Copy every data file first, manifest last, both via .part +
+            # rename. atomic_publish verifies each copy by read-back hash
+            # as it goes, so no second verification pass is needed.
+            try:
+                for src, _ in fresh:
+                    atomic_publish(src, out_dir / src.name)
+                write_manifest(out_dir / f"{run_id}.manifest.json", manifest)
+            except OSError as e:
+                self.repository.set_state(run_id, "FAILED", reason=str(e))
                 counts["FAILED"] = counts.get("FAILED", 0) + 1
-                log.error("outbound batch %s failed verification: %s", run_id, problems)
+                log.error("outbound batch %s failed staging: %s", run_id, e)
                 continue
             self.repository.set_state(
                 run_id,
@@ -157,9 +160,7 @@ class StageOutboundUseCase:
                 files=[{"name": src.name, "sha256": sha} for src, sha in fresh],
             )
             for src, _ in fresh:
-                dest = archive_dir / job / src.name
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                atomic_move(src, dest)
+                self._archive(src, archive_dir, job)
             counts["OUTBOUND_READY"] = counts.get("OUTBOUND_READY", 0) + 1
             log.info(
                 "outbound batch %s staged %d file(s) in %s (run %s)",

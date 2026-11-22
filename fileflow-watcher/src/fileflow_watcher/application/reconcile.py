@@ -19,8 +19,8 @@ class ReconcileUseCase:
     def run(self) -> list[str]:
         problems: list[str] = []
         for run in self.repository.list_by_state("PUBLISHED"):
-            record = self.repository.get(run.run_id)
-            published = record.detail.get("published") if record else None
+            # list_by_state already returns the full record, detail included.
+            published = run.detail.get("published")
             # A batch publishes several files; older rows recorded one.
             paths = published if isinstance(published, list) else [published]
             for path in paths:

@@ -47,6 +47,12 @@ class Transport(Protocol):
 
     def remote_size(self, remote_dir: str, remote_name: str) -> int | None: ...
 
+    def remote_mtime(self, remote_dir: str, remote_name: str) -> float | None:
+        """mtime of a remote file as epoch seconds, or None when the
+        transport cannot tell (unsupported, or the file is gone).
+        Sources use it to skip files still being written."""
+        ...
+
     def upload_many_with_manifest(
         self,
         files: list[tuple[str | Path, str]],
