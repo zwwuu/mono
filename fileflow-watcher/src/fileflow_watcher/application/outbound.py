@@ -49,15 +49,16 @@ from fileflow_contract import (
 )
 
 from ..domain.ports import RunRepository
+from ..infrastructure.config import WatcherConfig
 from ..infrastructure.filesystem import PART_SUFFIX, atomic_move, atomic_publish, log
 
 
 class StageOutboundUseCase:
-    def __init__(self, cfg: dict, *, repository: RunRepository):
+    def __init__(self, cfg: WatcherConfig, *, repository: RunRepository):
         self.cfg = cfg
         self.repository = repository
-        self.ftp_root = Path(cfg["ftp_root"])
-        self.share_root = Path(cfg["share_root"])
+        self.ftp_root = Path(cfg.ftp_root)
+        self.share_root = Path(cfg.share_root)
 
     def _archive(self, src: Path, archive_dir: Path, job: str) -> Path:
         """Move a staged SMB original into the per-job archive dir."""
@@ -66,18 +67,18 @@ class StageOutboundUseCase:
         return atomic_move(src, dest)
 
     def run(self) -> dict[str, int]:
-        outbound_cfg = self.cfg.get("outbound")
-        if not outbound_cfg:
+        outbound_cfg = self.cfg.outbound
+        if outbound_cfg is None:
             return {}
-        requests_dir = self.share_root / outbound_cfg.get("requests_dir", "upload-requests")
-        archive_dir = self.share_root / outbound_cfg.get("archive_dir", "upload-archive")
-        min_age = outbound_cfg.get("min_age_seconds", 2)
+        requests_dir = self.share_root / outbound_cfg.requests_dir
+        archive_dir = self.share_root / outbound_cfg.archive_dir
+        min_age = outbound_cfg.min_age_seconds
         now = time.time()
         counts: dict[str, int] = {}
         for job_dir in sorted(requests_dir.iterdir()) if requests_dir.is_dir() else []:
             job = job_dir.name
-            job_cfg = self.cfg["jobs"].get(job)
-            if job_cfg is None or not job_cfg.get("outbound"):
+            job_cfg = self.cfg.jobs.get(job)
+            if job_cfg is None or not job_cfg.outbound:
                 continue
             stable: list[Path] = []
             for src in sorted(job_dir.iterdir()):
@@ -135,9 +136,7 @@ class StageOutboundUseCase:
                 files=[ManifestFile(**file_entry(src, "output")) for src, _ in fresh],
                 direction="outbound",
                 created_at=utcnow_iso(),
-                extra={
-                    "source": (f"smb:{outbound_cfg.get('requests_dir', 'upload-requests')}/{job}/")
-                },
+                extra={"source": (f"smb:{outbound_cfg.requests_dir}/{job}/")},
             )
             out_dir = self.ftp_root / "outgoing" / job
             out_dir.mkdir(parents=True, exist_ok=True)

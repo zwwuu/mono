@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -18,17 +19,28 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fileflow_agent.adapters.cli import build_download_use_case
+from fileflow_agent.domain.integrity import render_template, template_context
+from fileflow_agent.infrastructure.config import (
+    SeleniumSourceConfig,
+    parse_config,
+    parse_source,
+    parse_transport,
+)
 from fileflow_agent.infrastructure.selenium_source import (
     SeleniumSource,
     SeleniumSourceError,
     resolve_selector,
 )
 from fileflow_agent.infrastructure.smb_source import SmbSource
-from fileflow_agent.infrastructure.sources import RemoteDirectorySource, build_source
+from fileflow_agent.infrastructure.sources import (
+    RemoteDirectorySource,
+    RemoteFilesSource,
+)
+from fileflow_agent.infrastructure.transport import resolve_password
 
 
 def _run_once(cfg: dict) -> dict:
-    use_case, transport, repository = build_download_use_case(cfg)
+    use_case, transport, repository = build_download_use_case(parse_config(cfg))
     try:
         return use_case.run()
     finally:
@@ -56,14 +68,16 @@ def test_remote_dir_selects_stable_files(tmp_path: Path):
     fresh = remote / "fresh.csv"
     fresh.write_text("x,9\n", encoding="utf-8")  # young mtime: still being written
     source = RemoteDirectorySource(
-        {
-            "type": "remote-dir",
-            "transport": "local",
-            "root": str(remote),
-            "remote_dir": ".",
-            "pattern": "*.csv",
-            "min_age_seconds": 2,
-        }
+        parse_source(
+            {
+                "type": "remote-dir",
+                "transport": "local",
+                "root": str(remote),
+                "remote_dir": ".",
+                "pattern": "*.csv",
+                "min_age_seconds": 2,
+            }
+        )
     )
     staged = source.download(tmp_path / "staging", "run-1")
     assert sorted(p.name for p in staged) == ["a.csv", "b.csv"]
@@ -83,19 +97,14 @@ def test_remote_dir_end_to_end_with_skip(tmp_path: Path):
             "min_age_seconds": 0,
         },
         "expect_csv": True,
-        "agent_procedure": "normalize-csv",
+        "procedure": "normalize-csv",
         "rename_pattern": "{date}_{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
-        "ftp": {"transport": "local", "root": str(tmp_path / "ftp")},
+        "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
     }
     assert _run_once(cfg)["status"] == "UPLOADED"
     assert _run_once(cfg)["status"] == "SKIPPED"  # second pass: already processed
-
-
-def test_build_source_rejects_unknown_type():
-    with pytest.raises(ValueError, match="unknown source type"):
-        build_source({"type": "carrier-pigeon"})
 
 
 # --------------------------------------------------------------------- smb
@@ -129,14 +138,16 @@ def test_smb_selects_stable_files(tmp_path: Path):
     )
     client = FakeSmb(share)
     source = SmbSource(
-        {
-            "type": "smb",
-            "server": "fileserver",
-            "share": "reports",
-            "path": "daily",
-            "pattern": "*.csv",
-            "min_age_seconds": 2,
-        },
+        parse_source(
+            {
+                "type": "smb",
+                "server": "fileserver",
+                "share": "reports",
+                "path": "daily",
+                "pattern": "*.csv",
+                "min_age_seconds": 2,
+            }
+        ),
         client=client,
     )
     staged = source.download(tmp_path / "staging", "run-1")
@@ -353,17 +364,19 @@ def test_selenium_action_flow(tmp_path: Path, monkeypatch):
     staging = tmp_path / "staging"
     driver = FakeDriver(_portal_dom(staging / ".downloads"))
     source = SeleniumSource(
-        {
-            "type": "selenium",
-            "actions": [
-                {"action": "goto", "url": "https://portal.example.com/login"},
-                {"action": "fill", "selector": "#username", "value": "alice"},
-                {"action": "fill", "selector": "#password", "secret": "PORTAL_PASSWORD"},
-                {"action": "click", "selector": "button[type=submit]"},
-                {"action": "wait_for", "selector": "a.download", "timeout_seconds": 5},
-                {"action": "download", "selector": "a.download", "timeout_seconds": 5},
-            ],
-        },
+        parse_source(
+            {
+                "type": "selenium",
+                "actions": [
+                    {"action": "goto", "url": "https://portal.example.com/login"},
+                    {"action": "fill", "selector": "#username", "value": "alice"},
+                    {"action": "fill", "selector": "#password", "secret_env": "PORTAL_PASSWORD"},
+                    {"action": "click", "selector": "button[type=submit]"},
+                    {"action": "wait_for", "selector": "a.download", "timeout_seconds": 5},
+                    {"action": "download", "selector": "a.download", "timeout_seconds": 5},
+                ],
+            }
+        ),
         driver=driver,
     )
     staged = source.download(staging, "run-1")
@@ -379,39 +392,39 @@ def test_selenium_action_flow(tmp_path: Path, monkeypatch):
 
 def test_selenium_validations():
     with pytest.raises(SeleniumSourceError, match="non-empty 'actions' list"):
-        SeleniumSource({"type": "selenium", "actions": []})
+        SeleniumSource(SeleniumSourceConfig(actions=()))
     with pytest.raises(SeleniumSourceError, match="needs a 'download' action"):
-        SeleniumSource({"type": "selenium", "actions": [{"action": "goto", "url": "https://x"}]})
+        SeleniumSource(SeleniumSourceConfig(actions=({"action": "goto", "url": "https://x"},)))
     with pytest.raises(SeleniumSourceError, match="unknown action"):
         SeleniumSource(
-            {
-                "type": "selenium",
-                "actions": [
+            SeleniumSourceConfig(
+                actions=(
                     {"action": "teleport", "url": "https://x"},
                     {"action": "download", "selector": "a"},
-                ],
-            }
+                )
+            )
         )
     with pytest.raises(SeleniumSourceError, match="unknown selector kind"):
         SeleniumSource(
-            {
-                "type": "selenium",
-                "actions": [{"action": "download", "selector": {"kind": "aura", "aura": "x"}}],
-            }
+            SeleniumSourceConfig(
+                actions=({"action": "download", "selector": {"kind": "aura", "aura": "x"}},)
+            )
         )
 
 
-def test_selenium_unset_secret(tmp_path: Path, monkeypatch):
+def test_selenium_unset_secret_env(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("PORTAL_PASSWORD", raising=False)
     driver = FakeDriver(_portal_dom(tmp_path / ".downloads"))
     source = SeleniumSource(
-        {
-            "type": "selenium",
-            "actions": [
-                {"action": "fill", "selector": "#password", "secret": "PORTAL_PASSWORD"},
-                {"action": "download", "selector": "a.download"},
-            ],
-        },
+        parse_source(
+            {
+                "type": "selenium",
+                "actions": [
+                    {"action": "fill", "selector": "#password", "secret_env": "PORTAL_PASSWORD"},
+                    {"action": "download", "selector": "a.download"},
+                ],
+            }
+        ),
         driver=driver,
     )
     with pytest.raises(SeleniumSourceError, match="env var 'PORTAL_PASSWORD' is not set"):
@@ -422,10 +435,12 @@ def test_selenium_download_timeout(tmp_path: Path):
     link = FakeEl("a", text="Download", attrs={"class": "download"})
     driver = FakeDriver(FakeEl("html", children=[FakeEl("body", children=[link])]))
     source = SeleniumSource(
-        {
-            "type": "selenium",
-            "actions": [{"action": "download", "selector": "a.download", "timeout_seconds": 1}],
-        },
+        parse_source(
+            {
+                "type": "selenium",
+                "actions": [{"action": "download", "selector": "a.download", "timeout_seconds": 1}],
+            }
+        ),
         driver=driver,
     )
     with pytest.raises(SeleniumSourceError, match="download timed out"):
@@ -513,3 +528,120 @@ def test_selenium_selectors():
             driver,
             {"kind": "row", "table": "#files", "column": "Title", "match": "Q9 Report"},
         )
+
+
+# ------------------------------------------------------------ remote-files
+def test_render_template_and_context():
+    ctx = template_context("ftp-inbox", "sales")
+    assert render_template("inbox/{year}{month}", ctx) == (f"inbox/{datetime.now():%Y%m}")
+    assert render_template("Test3-{kind}.csv", ctx) == "Test3-sales.csv"
+    assert render_template("{job}-{day}.csv", ctx) == (f"ftp-inbox-{datetime.now():%d}.csv")
+    with pytest.raises(ValueError, match="unknown token"):
+        render_template("Test-{nope}.csv", ctx)
+    assert "kind" not in template_context("ftp-inbox")
+
+
+def test_resolve_password_env_wins(monkeypatch):
+    cfg = parse_transport(
+        {"transport": "ftp", "host": "h", "password_env": "APP_FTP_PASSWORD", "password": "literal"}
+    )
+    monkeypatch.setenv("APP_FTP_PASSWORD", "from-env")
+    assert resolve_password(cfg) == "from-env"
+    monkeypatch.delenv("APP_FTP_PASSWORD")
+    assert resolve_password(cfg) == "literal"
+    assert resolve_password(parse_transport({"transport": "local", "root": "/tmp"})) == ""
+
+
+def _remote_files_cfg(remote: Path) -> tuple[dict, dict]:
+    now = datetime.now()
+    d1 = remote / "inbox" / f"{now:%Y%m}"
+    d1.mkdir(parents=True)
+    (d1 / f"Test1-{now:%Y}-{now:%m}-{now:%d}.csv").write_text("a,1\n", encoding="utf-8")
+    d2 = remote / "inbox" / f"{now:%Y}"
+    d2.mkdir(parents=True)
+    (d2 / f"Test2-{now:%Y}-{now:%m}-{now:%d}.csv").write_text("b,2\n", encoding="utf-8")
+    d3 = remote / "inbox" / "sales"
+    d3.mkdir(parents=True)
+    (d3 / "Test3-sales.csv").write_text("c,3\n", encoding="utf-8")
+    for p in remote.rglob("*.csv"):
+        os.utime(p, (time.time() - 3600, time.time() - 3600))
+    source_cfg = {
+        "type": "remote-files",
+        "transport": "local",
+        "root": str(remote),
+        "min_age_seconds": 5,
+        "files": [
+            {"directory": "inbox/{year}{month}", "name": "Test1-{year}-{month}-{day}.csv"},
+            {"directory": "inbox/{year}", "name": "Test2-{year}-{month}-{day}.csv"},
+            {"directory": "inbox/{kind}", "name": "Test3-{kind}.csv"},
+        ],
+    }
+    return source_cfg, {"job": "ftp-inbox", "kind": "sales"}
+
+
+def test_remote_files_downloads_named_files(tmp_path: Path):
+    source_cfg, job_cfg = _remote_files_cfg(tmp_path / "remote")
+    source = RemoteFilesSource(parse_source(source_cfg), job_cfg["job"], job_cfg.get("kind"))
+    staged = source.download(tmp_path / "staging", "run-1")
+    now = datetime.now()
+    assert sorted(p.name for p in staged) == [
+        f"Test1-{now:%Y}-{now:%m}-{now:%d}.csv",
+        f"Test2-{now:%Y}-{now:%m}-{now:%d}.csv",
+        "Test3-sales.csv",
+    ]
+
+
+def test_remote_files_missing_file_fails_loud(tmp_path: Path):
+    source_cfg, job_cfg = _remote_files_cfg(tmp_path / "remote")
+    source_cfg["files"] = [{"directory": "inbox/{year}{month}", "name": "Nope.csv"}]
+    with pytest.raises(ValueError, match="file not found"):
+        RemoteFilesSource(parse_source(source_cfg), job_cfg["job"], job_cfg.get("kind")).download(
+            tmp_path / "staging", "run-1"
+        )
+
+
+def test_remote_files_too_young_fails_loud(tmp_path: Path):
+    remote = tmp_path / "remote"
+    (remote / "inbox").mkdir(parents=True)
+    fresh = remote / "inbox" / "new.csv"
+    fresh.write_text("x,1\n", encoding="utf-8")  # mtime is now: still being written
+    source = RemoteFilesSource(
+        parse_source(
+            {
+                "type": "remote-files",
+                "transport": "local",
+                "root": str(remote),
+                "min_age_seconds": 300,
+                "files": [{"directory": "inbox", "name": "new.csv"}],
+            }
+        ),
+        "ftp-inbox",
+    )
+    with pytest.raises(ValueError, match="still being written"):
+        source.download(tmp_path / "staging", "run-1")
+
+
+def test_remote_files_end_to_end_direct_drop(tmp_path: Path):
+    source_cfg, _job_cfg = _remote_files_cfg(tmp_path / "remote")
+    now = datetime.now()
+    cfg = {
+        "job": "ftp-inbox",
+        "kind": "sales",
+        "source": source_cfg,
+        "expect_csv": True,
+        "procedure": "normalize-csv",
+        "rename_pattern": "{date}_{name}{ext}",
+        "staging_dir": str(tmp_path / "staging"),
+        "ledger_db": str(tmp_path / "agent.db"),
+        "destination": {
+            "transport": "local",
+            "root": str(tmp_path / "dest"),
+            "directory": "inbox/{year}{month}",
+        },
+    }
+    assert _run_once(cfg)["status"] == "UPLOADED"
+    dest_dir = tmp_path / "dest" / "inbox" / f"{now:%Y%m}"
+    assert len(list(dest_dir.glob("*.manifest.json"))) == 1
+    assert len(list(dest_dir.glob("*.csv"))) == 3
+    assert not list((tmp_path / "dest").glob("incoming"))  # no watcher incoming dir
+    assert _run_once(cfg)["status"] == "SKIPPED"  # second pass: already processed

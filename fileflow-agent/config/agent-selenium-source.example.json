@@ -1,14 +1,14 @@
 {
-  "agent_procedure": "normalize-csv",
-  "expect_csv": true,
-  "ftp": {
+  "destination": {
     "host": "192.168.10.20",
     "port": 22,
     "transport": "sftp",
     "username": "fileflow"
   },
+  "expect_csv": true,
   "job": "portal-report",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "procedure": "normalize-csv",
   "rename_pattern": "{date}_{name}{ext}",
   "source": {
     "actions": [
@@ -23,7 +23,7 @@
       },
       {
         "action": "fill",
-        "secret": "PORTAL_PASSWORD",
+        "secret_env": "PORTAL_PASSWORD",
         "selector": "#password"
       },
       {

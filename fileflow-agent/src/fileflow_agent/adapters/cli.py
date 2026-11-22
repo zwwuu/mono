@@ -10,13 +10,14 @@ imports a transport, a database, or the website.
 from __future__ import annotations
 
 import argparse
-import json
+import sys
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 from ..application.download import DownloadAndUploadUseCase
 from ..application.pickup import PickupUseCase
+from ..infrastructure.config import AgentConfig, ConfigError, load_config
 from ..infrastructure.filesystem import log, setup_logging
 from ..infrastructure.persistence import SqlAlchemyRunRepository
 from ..infrastructure.sources import build_source
@@ -24,30 +25,37 @@ from ..infrastructure.transport import build_transport
 from ..infrastructure.website import WebsiteUploader
 
 
-def load_config(path: str | Path) -> dict:
-    return json.loads(Path(path).read_text(encoding="utf-8"))
-
-
-def build_download_use_case(cfg: dict):
+def build_download_use_case(cfg: AgentConfig):
     """Compose one forward run: (use case, transport, repository).
 
     The caller owns the transport and repository and must close them.
+    The config was parsed at startup, so ``destination`` is present;
+    a config without ``source`` cannot run in download mode.
     """
-    transport = build_transport(cfg["ftp"])
-    repository = SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
+    if cfg.source is None:
+        raise ValueError("config has no 'source' section; download mode needs one")
+    transport = build_transport(cfg.destination.transport)
+    repository = SqlAlchemyRunRepository(Path(cfg.ledger_db))
     use_case = DownloadAndUploadUseCase(
-        cfg, source=build_source(cfg["source"]), transport=transport, repository=repository
+        cfg,
+        source=build_source(
+            cfg.source, cfg.job, cfg.kind, cfg.variables, cfg.date_format, cfg.time_format
+        ),
+        transport=transport,
+        repository=repository,
     )
     return use_case, transport, repository
 
 
-def build_pickup_use_case(cfg: dict):
-    """Compose one pickup run: (use case, transport, repository)."""
-    transport = build_transport(cfg["ftp"])
-    repository = SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
-    use_case = PickupUseCase(
-        cfg, transport=transport, repository=repository, uploader=WebsiteUploader(cfg["pickup"])
-    )
+def build_pickup_use_case(cfg: AgentConfig):
+    """Compose one pickup run: (use case, transport, repository).
+
+    The uploader is None when the config has no ``deliver`` section;
+    the use case then does nothing."""
+    transport = build_transport(cfg.destination.transport)
+    repository = SqlAlchemyRunRepository(Path(cfg.ledger_db))
+    uploader = WebsiteUploader(cfg.deliver) if cfg.deliver is not None else None
+    use_case = PickupUseCase(cfg, transport=transport, repository=repository, uploader=uploader)
     return use_case, transport, repository
 
 
@@ -75,9 +83,35 @@ def main(argv: list[str] | None = None) -> int:
     )
     ap.add_argument("--loop", type=int, default=0, help="repeat every N seconds; 0 = run once")
     ap.add_argument("--log-level", default="INFO")
+    ap.add_argument(
+        "--check-config",
+        action="store_true",
+        help="parse the config and exit: 0 when it is valid, 2 with the problems listed",
+    )
     args = ap.parse_args(argv)
     setup_logging(args.log_level)
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as e:
+        # A broken config must fail loud here, before the loop --
+        # never retry once a minute and log the same error forever.
+        print(f"config error: {e}", file=sys.stderr)
+        return 2
+    if args.check_config:
+        dest = cfg.destination.transport
+        where = dest.root if dest.kind == "local" else f"{dest.host}:{dest.port}"
+        summary = (
+            f"config OK: job {cfg.job!r}, source {cfg.source.type}, destination {dest.kind} {where}"
+        )
+        if cfg.deliver is not None:
+            summary += f", deliver {cfg.deliver.upload_url}"
+        print(summary)
+        return 0
+    if args.mode in ("download", "both") and cfg.source is None:
+        # Same class of failure as a bad config: fail loud here,
+        # before the loop, never as a per-run error.
+        print("config error: download mode needs a 'source' section", file=sys.stderr)
+        return 2
     while True:
         failed = False
         try:

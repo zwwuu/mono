@@ -16,8 +16,8 @@ source fails with a clear message instead of an obscure launch error.
 Action reference (each action is an object with an "action" field):
   {"action": "goto", "url": "https://portal.example.com/login"}
   {"action": "fill", "selector": "#username", "value": "alice"}
-  {"action": "fill", "selector": "#password", "secret": "PORTAL_PASSWORD"}
-      (secret = name of an environment variable; credentials never
+  {"action": "fill", "selector": "#password", "secret_env": "PORTAL_PASSWORD"}
+      (secret_env = name of an environment variable; credentials never
       belong in the config file -- same rule as the other secrets)
   {"action": "click", "selector": "button[type=submit]"}
   {"action": "wait", "seconds": 2}
@@ -53,8 +53,12 @@ import re
 import shutil
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .filesystem import PART_SUFFIX, log
+
+if TYPE_CHECKING:
+    from .config import SeleniumSourceConfig
 
 try:
     from selenium.webdriver.common.by import By
@@ -354,9 +358,9 @@ def validate_actions(actions):
         if kind in ("click", "wait_for", "download", "fill"):
             validate_selector(action.get("selector"), f"browser action {i} ({kind})")
         if kind == "fill":
-            if ("value" in action) == ("secret" in action):
+            if ("value" in action) == ("secret_env" in action):
                 raise SeleniumSourceError(
-                    f"browser action {i} (fill) needs exactly one of 'value' or 'secret'"
+                    f"browser action {i} (fill) needs exactly one of 'value' or 'secret_env'"
                 )
         if kind == "wait" and not isinstance(action.get("seconds"), (int, float)):
             raise SeleniumSourceError(f"browser action {i} (wait) needs 'seconds'")
@@ -375,12 +379,12 @@ class SeleniumSource:
     browser's download dir into dest_dir via .part + rename.
     """
 
-    def __init__(self, cfg: dict, driver=None):
+    def __init__(self, cfg: SeleniumSourceConfig, driver=None):
         self.cfg = cfg
-        self.actions = validate_actions(cfg.get("actions"))
-        self.headless = cfg.get("headless", True)
-        self.timeout = cfg.get("timeout_seconds", 60)
-        self.chrome_binary = cfg.get("chrome_binary")
+        self.actions = validate_actions(list(cfg.actions))
+        self.headless = cfg.headless
+        self.timeout = cfg.timeout_seconds
+        self.chrome_binary = cfg.chrome_binary
         self._driver = driver
         self._owns_driver = driver is None
 
@@ -464,11 +468,11 @@ class SeleniumSource:
             log.info("[selenium] goto %s", action["url"])
             driver.get(action["url"])
         elif kind == "fill":
-            if "secret" in action:
-                value = os.environ.get(action["secret"])
+            if "secret_env" in action:
+                value = os.environ.get(action["secret_env"])
                 if not value:
                     raise SeleniumSourceError(
-                        f"selenium fill: env var {action['secret']!r} is not set"
+                        f"selenium fill: env var {action['secret_env']!r} is not set"
                     )
             else:
                 value = action["value"]

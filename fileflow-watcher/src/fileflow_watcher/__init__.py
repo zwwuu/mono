@@ -21,4 +21,4 @@ deploy independently apart from that one install. Change the
 manifest format in the contract package and bump MANIFEST_VERSION.
 """
 
-__version__ = "2.2.0"
+__version__ = "2.5.0"

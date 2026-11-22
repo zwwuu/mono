@@ -73,7 +73,6 @@ src/fileflow_watcher/
   domain/          pure business rules (stdlib only, no I/O)
     entities.py    Manifest, ManifestFile, RunRecord, run states
     ports.py       RunRepository / Procedure
-    integrity.py   manifest verification, rename patterns, idempotency key
     procedures.py  procedure registry + built-ins
                    (rename-only, normalize-csv, uppercase-headers-csv)
   application/     use cases, written only against domain ports
@@ -82,6 +81,8 @@ src/fileflow_watcher/
     scan.py        ScanUseCase (one polling pass: incoming + outbound)
     reconcile.py   ReconcileUseCase (PUBLISHED runs vs share)
   infrastructure/  the outside world, behind the ports
+    config.py      config parser: JSON dict -> typed config, fails
+                   loud at startup with every problem listed
     filesystem.py  sha256, manifest I/O, atomic .part+rename
     persistence.py SQLAlchemy run ledger (RunRepository) + Alembic model
   adapters/
@@ -90,6 +91,7 @@ config/
   watcher.example.json   copy to watcher.json and fill in
   procedures_local.py    add your business procedures here
 tests/test_watcher.py    forward + reverse tests (no agent code)
+tests/test_config.py     config parser: valid shapes, every failure mode
 ```
 
 ## Architecture
@@ -152,11 +154,45 @@ output file and raise on bad input.
 
 ## Configuration (`config/watcher.json`)
 
+The config file is parsed once, at startup, before any scan starts
+(`infrastructure/config.py`): the raw JSON becomes a typed config
+(`WatcherConfig`; one `JobConfig` per entry in `jobs`, plus an
+`OutboundConfig`), and anything wrong raises one `ConfigError`
+listing *every* problem found -- missing keys, wrong types,
+unknown keys, unknown procedures, bad output patterns,
+out-of-range values -- instead of failing on the first one, or
+when a job's first manifest arrives with a bare `KeyError`. Check
+a config without running it:
+
+```bash
+fileflow-watcher --config config/watcher.json --check-config   # exit 0 when valid, 2 with the problems listed
+```
+
+A broken config fails before the loop or the reconcile, never as
+a per-run error. The procedure name is checked against the
+registry at startup (after `procedures_module` is imported, so
+custom procedures validate too), and `output_pattern` is checked
+by rendering it against the job's own context -- tokens are
+`{name}` `{run_id}` `{job}`, `{date}` `{time}` in the job's
+`date_format` / `time_format` (defaults `%Y%m%d` / `%H%M%S`), plus
+the job's `variables` -- and it must produce one filename.
+`share_dir` (and the outbound dirs) must stay under their root. A
+manifest for a job that is not in `jobs` at all is NOT a config
+error: the watcher still claims it and dead-letters it as an
+unknown job, never guessing a procedure.
+
+The output filename is the job's business logic, not the
+framework's: each job has its own datetime format and its own
+arbitrary variables. A variable name must be an identifier and
+must not collide with a built-in token (`name`, `run_id`, `job`,
+`date`, `time`).
+
 `ftp_root`, `share_root`, `ledger_db`, `jobs` — one entry per job:
 `procedure`, `share_dir`, `output_pattern`, `expect_csv`,
-`outbound` (reverse flow on/off), and optionally
-`procedures_module` (e.g. `procedures_local`). Plus `outbound`:
-`requests_dir`, `archive_dir`, `min_age_seconds`.
+`outbound` (reverse flow on/off), `variables`, `date_format`,
+`time_format`, and optionally `procedures_module` (e.g.
+`procedures_local`). Plus `outbound`: `requests_dir`,
+`archive_dir`, `min_age_seconds`.
 
 ## Folder layout at runtime
 
@@ -208,6 +244,12 @@ ruff check src tests
 ruff format --check src tests
 ``````
 
-4 tests, all with local folders (no agent, no server needed):
-forward publish to the share, corrupt file quarantined, duplicate
-not re-published, and reverse staging from the share to outgoing.
+35 tests, all with local folders (no agent, no server needed):
+forward publish to the share (single file and three-file batch),
+corrupt file quarantined, duplicate not re-published, reverse
+staging from the share to outgoing (single file and a multi-file
+batch in one job), an unknown job dead-lettered with its reason,
+a publish using the job's variables and date format, plus the
+config parser (`test_config.py`: valid shapes and defaults, every
+failure mode, the example config parses, `--check-config` exit
+codes, the job's variables and date/time formats).

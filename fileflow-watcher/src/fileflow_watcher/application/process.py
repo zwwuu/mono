@@ -34,6 +34,7 @@ retry is a NEW run_id from the agent (new idempotency key).
 
 from __future__ import annotations
 
+from datetime import datetime
 from pathlib import Path
 
 from fileflow_contract import (
@@ -48,6 +49,7 @@ from fileflow_contract import (
 
 from ..domain.ports import RunRepository
 from ..domain.procedures import get_procedure
+from ..infrastructure.config import WatcherConfig
 from ..infrastructure.filesystem import (
     atomic_move,
     atomic_publish,
@@ -58,12 +60,14 @@ from ..infrastructure.filesystem import (
 
 
 class ProcessIncomingUseCase:
-    def __init__(self, cfg: dict, *, repository: RunRepository, procedure_lookup=get_procedure):
+    def __init__(
+        self, cfg: WatcherConfig, *, repository: RunRepository, procedure_lookup=get_procedure
+    ):
         self.cfg = cfg
         self.repository = repository
         self.procedure_lookup = procedure_lookup
-        self.ftp_root = Path(cfg["ftp_root"])
-        self.share_root = Path(cfg["share_root"])
+        self.ftp_root = Path(cfg.ftp_root)
+        self.share_root = Path(cfg.share_root)
 
     # -- dead-letter helper --------------------------------------------
     def _dead_letter(
@@ -96,7 +100,7 @@ class ProcessIncomingUseCase:
         run_id = manifest.run_id
         job = manifest.job
         data_names = [f.name for f in manifest.files]
-        job_cfg = self.cfg["jobs"].get(job)
+        job_cfg = self.cfg.jobs.get(job)
         if job_cfg is None:
             # Unknown job: do not guess. Claim it so it is not re-scanned,
             # then dead-letter it with the reason attached.
@@ -147,32 +151,32 @@ class ProcessIncomingUseCase:
         self.repository.set_state(run_id, "PROCESSING")
         workdir = run_dir / "work"
         workdir.mkdir(exist_ok=True)
-        proc = self.procedure_lookup(job_cfg["procedure"])
+        proc = self.procedure_lookup(job_cfg.procedure)
         outputs: list[Path] = []
         try:
             for data_name in data_names:
                 output = proc.fn(run_dir / data_name, workdir, {"job": job, "run_id": run_id})
                 if not output.exists() or output.stat().st_size == 0:
                     raise ValueError(f"procedure produced no output: {output.name}")
-                if job_cfg.get("expect_csv"):
+                if job_cfg.expect_csv:
                     read_csv_rows(output)  # raises ValueError when unparseable
                 outputs.append(output)
         except Exception as e:  # noqa: BLE001 -- a procedure failure is a dead-letter
             self._dead_letter(
-                run_dir, run_id, f"procedure {job_cfg['procedure']}: {e}", "FAILED", "failed"
+                run_dir, run_id, f"procedure {job_cfg.procedure}: {e}", "FAILED", "failed"
             )
             return "FAILED"
         self.repository.set_state(run_id, "PROCESSED")
         log.info(
             "run %s processed by %s -> %d file(s)",
             run_id,
-            job_cfg["procedure"],
+            job_cfg.procedure,
             len(outputs),
         )
 
         # 5. PUBLISH to the share drive (only this machine can see it)
         #    .part + rename, then read-back verification, per file.
-        share_dir = self.share_root / job_cfg.get("share_dir", job)
+        share_dir = self.share_root / job_cfg.share_dir
         final_manifest = Manifest(
             version=manifest.version,
             run_id=run_id,
@@ -182,16 +186,26 @@ class ProcessIncomingUseCase:
             created_at=utcnow_iso(),
             extra={
                 "source_run": manifest.to_dict(),
-                "procedure": job_cfg["procedure"],
+                "procedure": job_cfg.procedure,
                 "procedure_version": proc.version,
             },
         )
         published: list[Path] = []
         try:
             for output in outputs:
-                out_name = job_cfg.get("output_pattern", "{name}").format(
-                    name=output.name, run_id=run_id, job=job
+                # The output filename is the job's business logic:
+                # its own variables, {date}/{time} in its own
+                # formats, plus the run's own name/run_id/job.
+                now = datetime.now()
+                context = dict(job_cfg.variables)
+                context.update(
+                    name=output.name,
+                    run_id=run_id,
+                    job=job,
+                    date=now.strftime(job_cfg.date_format),
+                    time=now.strftime(job_cfg.time_format),
                 )
+                out_name = job_cfg.output_pattern.format_map(context)
                 # atomic_publish copies via .part + rename and verifies
                 # the share copy by read-back hash as it lands.
                 published_path = atomic_publish(output, share_dir / out_name)

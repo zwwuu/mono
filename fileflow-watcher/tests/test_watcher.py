@@ -15,10 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fileflow_contract import file_entry, write_manifest
 
 from fileflow_watcher.adapters.cli import build_reconcile_use_case, build_scan_use_case
+from fileflow_watcher.infrastructure.config import parse_config
 
 
 def _scan_once(cfg: dict) -> dict[str, int]:
-    scan, repository = build_scan_use_case(cfg)
+    scan, repository = build_scan_use_case(parse_config(cfg))
     try:
         return scan.run()
     finally:
@@ -26,7 +27,7 @@ def _scan_once(cfg: dict) -> dict[str, int]:
 
 
 def _reconcile(cfg: dict) -> list[str]:
-    use_case, repository = build_reconcile_use_case(cfg)
+    use_case, repository = build_reconcile_use_case(parse_config(cfg))
     try:
         return use_case.run()
     finally:
@@ -60,16 +61,17 @@ def _seed_incoming(
     tmp_path: Path,
     run_id: str = "0123456789abcdef",
     content: str = " id , amount \n 1 , 10.5 \n\n2,20\n",
+    job: str = "daily-report",
 ) -> Path:
-    incoming = tmp_path / "ftp" / "incoming" / "daily-report"
+    incoming = tmp_path / "ftp" / "incoming" / job
     incoming.mkdir(parents=True, exist_ok=True)
     data = incoming / "20261117_daily.csv"
     data.write_text(content, encoding="utf-8")
     manifest = {
         "version": 1,
         "run_id": run_id,
-        "job": "daily-report",
-        "idempotency_key": f"daily-report|{run_id}",
+        "job": job,
+        "idempotency_key": f"{job}|{run_id}",
         "files": [file_entry(data, "output")],
     }
     write_manifest(incoming / "20261117_daily.manifest.json", manifest)
@@ -207,3 +209,30 @@ def test_reverse_batches_multiple_files_into_one_job(tmp_path: Path):
     (requests / "part-a.csv").write_text("id,amount\n1,10\n", encoding="utf-8")
     assert _scan_once(cfg) == {"DUPLICATE": 1}
     assert len(list(outgoing.glob("*.manifest.json"))) == 1
+
+
+def test_unknown_job_is_dead_lettered(tmp_path: Path):
+    # A manifest for a job that is not in `jobs` is NOT a config
+    # error: the watcher claims it and dead-letters it with the
+    # reason attached, never guessing a procedure.
+    _seed_incoming(tmp_path, job="no-such-job")
+    assert _scan_once(_watcher_cfg(tmp_path)) == {"FAILED": 1}
+    failed = tmp_path / "ftp" / "failed" / "0123456789abcdef"
+    assert (failed / "reason.txt").read_text(encoding="utf-8") == "unknown job 'no-such-job'"
+
+
+def test_publish_uses_job_variables_and_date_format(tmp_path: Path):
+    # The output filename is the job's business logic: its own
+    # variable and its own date format land in the published name.
+    from datetime import datetime
+
+    _seed_incoming(tmp_path)
+    cfg = _watcher_cfg(tmp_path)
+    cfg["jobs"]["daily-report"].update(
+        variables={"client": "acme"},
+        date_format="%Y-%m-%d",
+        output_pattern="{date}_{client}_{name}",
+    )
+    assert _scan_once(cfg) == {"PUBLISHED": 1}
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert list((tmp_path / "share" / "reports" / "daily").glob(f"{today}_acme_20261117_daily.csv"))

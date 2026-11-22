@@ -24,15 +24,16 @@ from pathlib import Path
 from fileflow_contract import sha256_file
 
 from .. import __version__
+from .config import DeliverConfig
 from .filesystem import log
 
 
 class WebsiteUploader:
-    def __init__(self, pickup_cfg: dict):
-        self.url = pickup_cfg["upload_url"]
-        self.field = pickup_cfg.get("field", "file")
-        self.timeout = pickup_cfg.get("timeout_seconds", 60)
-        self.auth_env = pickup_cfg.get("auth_env")
+    def __init__(self, cfg: DeliverConfig):
+        self.url = cfg.upload_url
+        self.field = cfg.field
+        self.timeout = cfg.timeout_seconds
+        self.auth_env = cfg.auth_env
 
     def upload(self, file_path: Path, *, run_id: str, job: str) -> None:
         self.upload_many([file_path], run_id=run_id, job=job)

@@ -27,6 +27,7 @@ import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .config import TransportConfig
 from .filesystem import PART_SUFFIX, log
 
 
@@ -285,29 +286,38 @@ class SftpTransport(Transport):
             log.debug("sftp close failed (ignored): %s", e)
 
 
-def build_transport(cfg: dict) -> Transport:
-    """Build a transport from the agent config ``ftp`` section.
+def resolve_password(cfg: TransportConfig) -> str:
+    """Password for an FTP/SFTP connection. The env var named in
+    ``password_env`` (default FILEFLOW_FTP_PASSWORD) wins when set;
+    a literal ``password`` in the config is the fallback. The literal
+    is less safe -- it sits in a file -- so prefer the env var."""
+    return os.environ.get(cfg.password_env or "FILEFLOW_FTP_PASSWORD") or cfg.password or ""
 
-    {"transport": "sftp", "host": ..., "port": 22, "username": ...}
-    Password / key come from env vars, never from the config file:
-    FILEFLOW_FTP_PASSWORD / FILEFLOW_SFTP_KEY_FILE.
+
+def resolve_key_file(cfg: TransportConfig) -> str | None:
+    """SFTP key file: the env var named in ``key_file_env`` (default
+    FILEFLOW_SFTP_KEY_FILE) wins; a literal ``key_file`` is the fallback."""
+    return os.environ.get(cfg.key_file_env or "FILEFLOW_SFTP_KEY_FILE") or cfg.key_file
+
+
+def build_transport(cfg: TransportConfig) -> Transport:
+    """Build a transport from a parsed transport config.
+
+    Password / key come from env vars first (FILEFLOW_FTP_PASSWORD /
+    FILEFLOW_SFTP_KEY_FILE, or the names in ``password_env`` /
+    ``key_file_env``); a literal ``password`` / ``key_file`` in the
+    config is the fallback.
     """
-    kind = cfg.get("transport", "local")
-    if kind == "local":
-        return LocalTransport(cfg["root"])
-    if kind == "ftp":
-        return FtpTransport(
-            cfg["host"],
-            cfg.get("port", 21),
-            cfg.get("username", ""),
-            os.environ.get("FILEFLOW_FTP_PASSWORD", ""),
-        )
-    if kind == "sftp":
+    if cfg.kind == "local":
+        return LocalTransport(cfg.root)
+    if cfg.kind == "ftp":
+        return FtpTransport(cfg.host, cfg.port, cfg.username, resolve_password(cfg))
+    if cfg.kind == "sftp":
         return SftpTransport(
-            cfg["host"],
-            cfg.get("port", 22),
-            cfg.get("username", ""),
-            os.environ.get("FILEFLOW_FTP_PASSWORD") or None,
-            os.environ.get("FILEFLOW_SFTP_KEY_FILE"),
+            cfg.host,
+            cfg.port,
+            cfg.username,
+            resolve_password(cfg) or None,
+            resolve_key_file(cfg),
         )
-    raise ValueError(f"unknown transport {kind!r} (want local|ftp|sftp)")
+    raise ValueError(f"unknown transport {cfg.kind!r} (want local|ftp|sftp)")

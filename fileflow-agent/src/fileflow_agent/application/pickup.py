@@ -19,17 +19,18 @@ from pathlib import Path
 from fileflow_contract import Manifest, read_manifest, verify_files
 
 from ..domain.ports import RunRepository, Transport, WebsiteUploader
+from ..infrastructure.config import AgentConfig
 from ..infrastructure.filesystem import log
 
 
 class PickupUseCase:
     def __init__(
         self,
-        cfg: dict,
+        cfg: AgentConfig,
         *,
         transport: Transport,
         repository: RunRepository,
-        uploader: WebsiteUploader,
+        uploader: WebsiteUploader | None,
     ):
         self.cfg = cfg
         self.transport = transport
@@ -40,86 +41,84 @@ class PickupUseCase:
         """Pick up staged batches from FTP outgoing/<job>/ and upload
         them to the website. Returns counts, e.g.
         {"UPLOADED_TO_WEBSITE": 1} for one batch."""
-        pickup_cfg = self.cfg.get("pickup")
-        if not pickup_cfg:
+        if self.cfg.deliver is None:
             return {}
-        jobs = pickup_cfg.get("jobs") or [self.cfg["job"]]
+        job = self.cfg.job
         counts: dict[str, int] = {}
-        for job in jobs:
-            remote_dir = f"outgoing/{job}"
-            for manifest_name in sorted(self.transport.list_names(remote_dir)):
-                if not manifest_name.endswith(".manifest.json"):
-                    continue
-                staging = Path(self.cfg["staging_dir"]) / "pickup"
-                staging.mkdir(parents=True, exist_ok=True)
-                local_manifest = staging / manifest_name
+        remote_dir = f"outgoing/{job}"
+        for manifest_name in sorted(self.transport.list_names(remote_dir)):
+            if not manifest_name.endswith(".manifest.json"):
+                continue
+            staging = Path(self.cfg.staging_dir) / "pickup"
+            staging.mkdir(parents=True, exist_ok=True)
+            local_manifest = staging / manifest_name
+            try:
+                self.transport.download(remote_dir, manifest_name, local_manifest)
+                manifest = Manifest.from_dict(read_manifest(local_manifest))
+            except (ValueError, OSError, json.JSONDecodeError) as e:
+                log.error("pickup: bad manifest %s: %s", manifest_name, e)
+                counts["FAILED"] = counts.get("FAILED", 0) + 1
+                continue
+            if not manifest.files:
+                log.error("pickup: manifest %s lists no files", manifest_name)
+                counts["FAILED"] = counts.get("FAILED", 0) + 1
+                continue
+            run_id = manifest.run_id
+            remote_names = set(self.transport.list_names(remote_dir))
+            if any(f.name not in remote_names for f in manifest.files):
+                # Batch incomplete: a file is still arriving. Leave
+                # the whole batch alone; try again next pass.
+                log.info("pickup: batch %s incomplete, waiting", run_id)
+                continue
+            local_files: list[Path] = []
+            failed = False
+            for entry in manifest.files:
+                local_file = staging / entry.name
                 try:
-                    self.transport.download(remote_dir, manifest_name, local_manifest)
-                    manifest = Manifest.from_dict(read_manifest(local_manifest))
-                except (ValueError, OSError, json.JSONDecodeError) as e:
-                    log.error("pickup: bad manifest %s: %s", manifest_name, e)
-                    counts["FAILED"] = counts.get("FAILED", 0) + 1
-                    continue
-                if not manifest.files:
-                    log.error("pickup: manifest %s lists no files", manifest_name)
-                    counts["FAILED"] = counts.get("FAILED", 0) + 1
-                    continue
-                run_id = manifest.run_id
-                remote_names = set(self.transport.list_names(remote_dir))
-                if any(f.name not in remote_names for f in manifest.files):
-                    # Batch incomplete: a file is still arriving. Leave
-                    # the whole batch alone; try again next pass.
-                    log.info("pickup: batch %s incomplete, waiting", run_id)
-                    continue
-                local_files: list[Path] = []
-                failed = False
-                for entry in manifest.files:
-                    local_file = staging / entry.name
-                    try:
-                        self.transport.download(remote_dir, entry.name, local_file)
-                    except OSError as e:
-                        log.error("pickup: download of %s failed: %s", entry.name, e)
-                        counts["FAILED"] = counts.get("FAILED", 0) + 1
-                        failed = True
-                        break
-                    local_files.append(local_file)
-                if failed:
-                    continue
-                problems = verify_files(staging, manifest)
-                if problems:
-                    # Hash mismatch: leave the outgoing files alone for
-                    # the operator; never upload a corrupt file.
-                    log.error("pickup: batch %s failed verification: %s", run_id, problems)
-                    counts["FAILED"] = counts.get("FAILED", 0) + 1
-                    continue
-                is_new = self.repository.claim(
-                    run_id=run_id,
-                    job=job,
-                    idempotency_key=manifest.idempotency_key,
-                )
-                record = self.repository.get(run_id)
-                if not is_new and record is not None and record.state == "UPLOADED_TO_WEBSITE":
-                    # Crash between website upload and outgoing cleanup:
-                    # the site already has it, so just clear outgoing.
-                    for entry in manifest.files:
-                        self.transport.delete(remote_dir, entry.name)
-                    self.transport.delete(remote_dir, manifest_name)
-                    counts["DUPLICATE"] = counts.get("DUPLICATE", 0) + 1
-                    log.warning("pickup: batch %s already uploaded; cleared outgoing", run_id)
-                    continue
-                try:
-                    self.uploader.upload_many(local_files, run_id=run_id, job=job)
+                    self.transport.download(remote_dir, entry.name, local_file)
                 except OSError as e:
-                    log.error("pickup: website upload failed for batch %s: %s", run_id, e)
+                    log.error("pickup: download of %s failed: %s", entry.name, e)
                     counts["FAILED"] = counts.get("FAILED", 0) + 1
-                    continue
-                # Only now, after a verified upload, clear outgoing.
+                    failed = True
+                    break
+                local_files.append(local_file)
+            if failed:
+                continue
+            problems = verify_files(staging, manifest)
+            if problems:
+                # Hash mismatch: leave the outgoing files alone for
+                # the operator; never upload a corrupt file.
+                log.error("pickup: batch %s failed verification: %s", run_id, problems)
+                counts["FAILED"] = counts.get("FAILED", 0) + 1
+                continue
+            is_new = self.repository.claim(
+                run_id=run_id,
+                job=job,
+                idempotency_key=manifest.idempotency_key,
+            )
+            record = self.repository.get(run_id)
+            if not is_new and record is not None and record.state == "UPLOADED_TO_WEBSITE":
+                # Crash between website upload and outgoing cleanup:
+                # the site already has it, so just clear outgoing.
                 for entry in manifest.files:
                     self.transport.delete(remote_dir, entry.name)
                 self.transport.delete(remote_dir, manifest_name)
-                self.repository.set_state(run_id, "UPLOADED_TO_WEBSITE")
-                for local_file in local_files:
-                    local_file.unlink(missing_ok=True)
-                local_manifest.unlink(missing_ok=True)
-                counts["UPLOADED_TO_WEBSITE"] = counts.get("UPLOADED_TO_WEBSITE", 0) + 1
+                counts["DUPLICATE"] = counts.get("DUPLICATE", 0) + 1
+                log.warning("pickup: batch %s already uploaded; cleared outgoing", run_id)
+                continue
+            try:
+                self.uploader.upload_many(local_files, run_id=run_id, job=job)
+            except OSError as e:
+                log.error("pickup: website upload failed for batch %s: %s", run_id, e)
+                counts["FAILED"] = counts.get("FAILED", 0) + 1
+                continue
+            # Only now, after a verified upload, clear outgoing.
+            for entry in manifest.files:
+                self.transport.delete(remote_dir, entry.name)
+            self.transport.delete(remote_dir, manifest_name)
+            self.repository.set_state(run_id, "UPLOADED_TO_WEBSITE")
+            for local_file in local_files:
+                local_file.unlink(missing_ok=True)
+            local_manifest.unlink(missing_ok=True)
+            counts["UPLOADED_TO_WEBSITE"] = counts.get("UPLOADED_TO_WEBSITE", 0) + 1
         return counts

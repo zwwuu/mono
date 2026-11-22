@@ -17,12 +17,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fileflow_contract import file_entry, verify_files, write_manifest
 
 from fileflow_agent.adapters.cli import build_download_use_case, build_pickup_use_case
+from fileflow_agent.infrastructure.config import parse_config
 
 RECEIVED: list[bytes] = []
 
 
 def _run_once(cfg: dict) -> dict:
-    use_case, transport, repository = build_download_use_case(cfg)
+    use_case, transport, repository = build_download_use_case(parse_config(cfg))
     try:
         return use_case.run()
     finally:
@@ -31,7 +32,7 @@ def _run_once(cfg: dict) -> dict:
 
 
 def _pickup_once(cfg: dict) -> dict[str, int]:
-    use_case, transport, repository = build_pickup_use_case(cfg)
+    use_case, transport, repository = build_pickup_use_case(parse_config(cfg))
     try:
         return use_case.run()
     finally:
@@ -70,11 +71,11 @@ def _agent_cfg(tmp_path: Path, source: Path) -> dict:
         "job": "daily-report",
         "source": {"type": "local", "path": str(source)},
         "expect_csv": True,
-        "agent_procedure": "normalize-csv",
+        "procedure": "normalize-csv",
         "rename_pattern": "{date}_{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
-        "ftp": {"transport": "local", "root": str(tmp_path / "ftp")},
+        "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
     }
 
 
@@ -211,9 +212,8 @@ def _pickup_cfg(tmp_path: Path, port: int) -> dict:
         "job": "daily-report",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
-        "ftp": {"transport": "local", "root": str(tmp_path / "ftp")},
-        "pickup": {
-            "jobs": ["daily-report"],
+        "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
+        "deliver": {
             "upload_url": f"http://127.0.0.1:{port}/upload",
             "field": "file",
         },
@@ -292,3 +292,21 @@ def test_pickup_waits_for_partial_batch(tmp_path: Path):
         ]
     finally:
         server.shutdown()
+
+
+def test_rename_uses_job_variables_and_date_format(tmp_path: Path):
+    # The filename render is the job's business logic: its own
+    # variable and its own date format land in the output name.
+    from datetime import datetime
+
+    source = tmp_path / "daily.csv"
+    source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
+    cfg = _agent_cfg(tmp_path, source)
+    cfg["variables"] = {"client": "acme"}
+    cfg["date_format"] = "%Y-%m-%d"
+    cfg["rename_pattern"] = "{date}_{client}_{name}{ext}"
+    result = _run_once(cfg)
+    assert result["status"] == "UPLOADED"
+    incoming = tmp_path / "ftp" / "incoming" / "daily-report"
+    today = datetime.now().strftime("%Y-%m-%d")
+    assert list(incoming.glob(f"{today}_acme_daily.csv"))

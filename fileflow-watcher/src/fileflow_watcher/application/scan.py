@@ -15,6 +15,7 @@ from pathlib import Path
 from fileflow_contract import Manifest, read_manifest
 
 from ..domain.ports import RunRepository
+from ..infrastructure.config import WatcherConfig
 from ..infrastructure.filesystem import log
 from .outbound import StageOutboundUseCase
 from .process import ProcessIncomingUseCase
@@ -23,7 +24,7 @@ from .process import ProcessIncomingUseCase
 class ScanUseCase:
     def __init__(
         self,
-        cfg: dict,
+        cfg: WatcherConfig,
         *,
         repository: RunRepository,
         incoming: ProcessIncomingUseCase,
@@ -33,7 +34,7 @@ class ScanUseCase:
         self.repository = repository
         self.incoming = incoming
         self.outbound = outbound
-        self.ftp_root = Path(cfg["ftp_root"])
+        self.ftp_root = Path(cfg.ftp_root)
 
     def run(self) -> dict[str, int]:
         counts: dict[str, int] = {}

@@ -11,7 +11,7 @@ helpers.
 from __future__ import annotations
 
 import argparse
-import json
+import sys
 import time
 from pathlib import Path
 
@@ -19,25 +19,16 @@ from ..application.outbound import StageOutboundUseCase
 from ..application.process import ProcessIncomingUseCase
 from ..application.reconcile import ReconcileUseCase
 from ..application.scan import ScanUseCase
+from ..infrastructure.config import ConfigError, WatcherConfig, load_config
 from ..infrastructure.filesystem import log, setup_logging
 from ..infrastructure.persistence import SqlAlchemyRunRepository
 
 
-def load_config(path: str | Path) -> dict:
-    cfg = json.loads(Path(path).read_text(encoding="utf-8"))
-    # Optional local procedures file: extra business procedures that
-    # live next to the config, imported without touching this watcher.
-    extra = cfg.get("procedures_module")
-    if extra:
-        __import__(extra)
-    return cfg
+def _open_repository(cfg: WatcherConfig) -> SqlAlchemyRunRepository:
+    return SqlAlchemyRunRepository(Path(cfg.ledger_db))
 
 
-def _open_repository(cfg: dict) -> SqlAlchemyRunRepository:
-    return SqlAlchemyRunRepository(Path(cfg["ledger_db"]))
-
-
-def build_scan_use_case(cfg: dict):
+def build_scan_use_case(cfg: WatcherConfig):
     """Compose one scan pass: (scan use case, repository).
 
     The caller owns the repository and must close it.
@@ -52,10 +43,10 @@ def build_scan_use_case(cfg: dict):
     return scan, repository
 
 
-def build_reconcile_use_case(cfg: dict):
+def build_reconcile_use_case(cfg: WatcherConfig):
     """Compose a reconcile run: (reconcile use case, repository)."""
     repository = _open_repository(cfg)
-    return ReconcileUseCase(cfg, repository=repository), repository
+    return ReconcileUseCase(repository=repository), repository
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -68,9 +59,29 @@ def main(argv: list[str] | None = None) -> int:
         help="check ledger PUBLISHED runs against the share, then exit",
     )
     ap.add_argument("--log-level", default="INFO")
+    ap.add_argument(
+        "--check-config",
+        action="store_true",
+        help="parse the config and exit: 0 when it is valid, 2 with the problems listed",
+    )
     args = ap.parse_args(argv)
     setup_logging(args.log_level)
-    cfg = load_config(args.config)
+    try:
+        cfg = load_config(args.config)
+    except ConfigError as e:
+        # A broken config must fail loud here, before the loop or
+        # the reconcile -- never as a per-run error, and never
+        # retried once a minute in loop mode.
+        print(f"config error: {e}", file=sys.stderr)
+        return 2
+    if args.check_config:
+        summary = (
+            f"config OK: {len(cfg.jobs)} job(s) "
+            f"({', '.join(sorted(cfg.jobs))}), "
+            f"outbound {'on' if cfg.outbound is not None else 'off'}"
+        )
+        print(summary)
+        return 0
     if args.reconcile:
         use_case, repository = build_reconcile_use_case(cfg)
         try:

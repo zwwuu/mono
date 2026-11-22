@@ -22,18 +22,19 @@ import shutil
 import time
 from pathlib import Path
 
+from .config import SmbSourceConfig
 from .filesystem import PART_SUFFIX, log
 
 
 class SmbSource:
-    def __init__(self, cfg: dict, client=None):
-        self.server = cfg["server"]
-        self.share = cfg["share"]
-        self.path = cfg.get("path", "")
-        self.pattern = cfg.get("pattern", "*")
-        self.min_age = cfg.get("min_age_seconds", 5)
-        self.username = cfg.get("username", "")
-        self.password = os.environ.get(cfg.get("password_env", "FILEFLOW_SMB_PASSWORD"), "")
+    def __init__(self, cfg: SmbSourceConfig, client=None):
+        self.server = cfg.server
+        self.share = cfg.share
+        self.path = cfg.path
+        self.pattern = cfg.pattern
+        self.min_age = cfg.min_age_seconds
+        self.username = cfg.username
+        self.password = os.environ.get(cfg.password_env or "FILEFLOW_SMB_PASSWORD", "")
         if client is None:
             try:
                 import smbclient

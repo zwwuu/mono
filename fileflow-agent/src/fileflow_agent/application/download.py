@@ -54,16 +54,17 @@ from fileflow_contract import (
     write_manifest,
 )
 
-from ..domain.integrity import render_name
+from ..domain.integrity import render_name, render_template, template_context
 from ..domain.ports import RunRepository, Source, Transport
 from ..domain.procedures import get_procedure
+from ..infrastructure.config import AgentConfig, source_reference
 from ..infrastructure.filesystem import log, read_csv_rows
 
 
-def validate_input(path: Path, job_cfg: dict) -> None:
+def validate_input(path: Path, expect_csv: bool) -> None:
     if path.stat().st_size == 0:
         raise ValueError(f"downloaded file is empty: {path.name}")
-    if job_cfg.get("expect_csv"):
+    if expect_csv:
         rows = read_csv_rows(path)
         if not any(c.strip() for c in rows[0]):
             raise ValueError(f"not a parseable CSV: {path.name}")
@@ -72,7 +73,7 @@ def validate_input(path: Path, job_cfg: dict) -> None:
 class DownloadAndUploadUseCase:
     def __init__(
         self,
-        cfg: dict,
+        cfg: AgentConfig,
         *,
         source: Source,
         transport: Transport,
@@ -87,9 +88,9 @@ class DownloadAndUploadUseCase:
 
     def run(self) -> dict:
         cfg = self.cfg
-        job = cfg["job"]
+        job = cfg.job
         run_id = new_run_id()
-        staging = Path(cfg["staging_dir"]) / run_id
+        staging = Path(cfg.staging_dir) / run_id
         staging.mkdir(parents=True, exist_ok=True)
         log.info("run %s job=%s starting", run_id, job)
         try:
@@ -111,7 +112,7 @@ class DownloadAndUploadUseCase:
                     log.info("run %s: %s already processed, skipped", run_id, path.name)
                     skipped.append(path.name)
                     continue
-                validate_input(path, cfg)
+                validate_input(path, cfg.expect_csv)
                 fresh.append((path, input_sha))
                 log.info(
                     "run %s downloaded %s (%d bytes, sha256 %s...)",
@@ -132,7 +133,7 @@ class DownloadAndUploadUseCase:
                 }
 
             # 3. first rename / format each fresh file (agent-side procedure)
-            proc_name = cfg.get("agent_procedure", "rename-only")
+            proc_name = cfg.procedure
             proc = self.procedure_lookup(proc_name)
             outputs: list[tuple[Path, str]] = []
             for path, _ in fresh:
@@ -142,11 +143,14 @@ class DownloadAndUploadUseCase:
                 )
                 ext = f".{ext}" if ext else ""
                 out_name = render_name(
-                    cfg.get("rename_pattern", "{date}_{name}{ext}"),
+                    cfg.rename_pattern,
                     name=stem,
                     ext=ext,
                     job=job,
                     run_id=run_id,
+                    variables=cfg.variables,
+                    date_format=cfg.date_format,
+                    time_format=cfg.time_format,
                 )
                 output = staging / out_name
                 if formatted != output:
@@ -163,11 +167,9 @@ class DownloadAndUploadUseCase:
                 files=[ManifestFile(**file_entry(output, "output")) for output, _ in outputs],
                 created_at=utcnow_iso(),
                 extra={
-                    "source_url": cfg["source"].get("url")
-                    or cfg["source"].get("path")
-                    or cfg["source"].get("dir"),
-                    "agent_procedure": proc_name,
-                    "agent_procedure_version": proc.version,
+                    "source_url": source_reference(cfg.source),
+                    "procedure": proc_name,
+                    "procedure_version": proc.version,
                     # Input hashes are provenance / idempotency only: the
                     # input files themselves are NOT uploaded, so they must
                     # not appear in "files" -- the watcher verifies only the
@@ -177,8 +179,21 @@ class DownloadAndUploadUseCase:
             manifest_path = staging / f"{run_id}.manifest.json"
             write_manifest(manifest_path, manifest)
 
-            # 5-6. upload every output first, manifest last; verify; clean up
-            remote_dir = f"incoming/{job}"
+            # 5-6. upload every output first, manifest last; verify; clean up.
+            # The destination is a templated directory when the config
+            # names one (destination.directory, e.g. a date-partitioned
+            # inbox for a direct drop); otherwise the classic
+            # incoming/<job>/ the watcher scans.
+            dir_template = cfg.destination.directory
+            if dir_template:
+                remote_dir = render_template(
+                    dir_template,
+                    template_context(
+                        cfg.job, cfg.kind, cfg.variables, cfg.date_format, cfg.time_format
+                    ),
+                )
+            else:
+                remote_dir = f"incoming/{job}"
             self.transport.upload_many_with_manifest(outputs, manifest_path, remote_dir)
             self.repository.claim(
                 run_id=run_id,

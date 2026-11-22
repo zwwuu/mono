@@ -1,28 +1,25 @@
 {
-  "agent_procedure": "normalize-csv",
-  "expect_csv": true,
-  "ftp": {
+  "deliver": {
+    "auth_env": "FILEFLOW_UPLOAD_TOKEN",
+    "field": "file",
+    "timeout_seconds": 60,
+    "upload_url": "https://example.com/upload"
+  },
+  "destination": {
     "host": "192.168.10.20",
     "port": 22,
     "transport": "sftp",
     "username": "fileflow"
   },
+  "expect_csv": true,
   "job": "daily-report",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "procedure": "normalize-csv",
   "rename_pattern": "{date}_{name}{ext}",
   "source": {
     "timeout_seconds": 60,
     "type": "website",
     "url": "https://example.com/reports/daily.csv"
   },
-  "staging_dir": "/var/lib/fileflow-agent/staging",
-  "pickup": {
-    "jobs": [
-      "daily-report"
-    ],
-    "upload_url": "https://example.com/upload",
-    "field": "file",
-    "auth_env": "FILEFLOW_UPLOAD_TOKEN",
-    "timeout_seconds": 60
-  }
+  "staging_dir": "/var/lib/fileflow-agent/staging"
 }

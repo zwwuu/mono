@@ -1,0 +1,38 @@
+{
+  "destination": {
+    "directory": "/home/fileflow/inbox/{year}{month}",
+    "host": "192.168.10.20",
+    "port": 22,
+    "transport": "sftp",
+    "username": "fileflow"
+  },
+  "job": "ftp-inbox",
+  "kind": "sales",
+  "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "procedure": "normalize-csv",
+  "rename_pattern": "{date}_{name}{ext}",
+  "source": {
+    "files": [
+      {
+        "directory": "/home/fileflow/inbox/{year}{month}",
+        "name": "Test1-{year}-{month}-{day}.csv"
+      },
+      {
+        "directory": "/home/fileflow/inbox/{year}",
+        "name": "Test2-{year}-{month}-{day}.csv"
+      },
+      {
+        "directory": "/home/fileflow/inbox/{kind}",
+        "name": "Test3-{kind}.csv"
+      }
+    ],
+    "host": "192.168.10.30",
+    "min_age_seconds": 5,
+    "password_env": "APP_FTP_PASSWORD",
+    "port": 21,
+    "transport": "ftp",
+    "type": "remote-files",
+    "username": "fileflow"
+  },
+  "staging_dir": "/var/lib/fileflow-agent/staging"
+}

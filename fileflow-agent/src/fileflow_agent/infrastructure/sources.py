@@ -6,35 +6,44 @@ return the completed local paths. One run fetches one or many files,
 but it is always one manifest. A new source type is a new class
 here plus one line in build_source -- no use-case change.
 
-Remote sources (remote-dir, smb, selenium) open their connection
-inside download() and close it before returning, so a --loop pass
-never leaks a connection. Tests can inject the backend instead:
-RemoteDirectorySource takes an optional transport, SmbSource an
-optional smbclient-like object, SeleniumSource an optional driver.
+Remote sources (remote-dir, remote-files, smb, selenium) open their
+connection inside download() and close it before returning, so a
+--loop pass never leaks a connection. Tests can inject the backend
+instead: RemoteDirectorySource / RemoteFilesSource take an optional
+transport, SmbSource an optional smbclient-like object,
+SeleniumSource an optional driver.
 """
 
 from __future__ import annotations
 
 import fnmatch
-import os
 import shutil
 import time
 import urllib.request
 from pathlib import Path
 
 from .. import __version__
+from ..domain.integrity import render_template, template_context
 from ..domain.ports import Source
+from .config import (
+    LocalDirSourceConfig,
+    LocalSourceConfig,
+    RemoteDirSourceConfig,
+    RemoteFilesSourceConfig,
+    SourceConfig,
+    WebsiteSourceConfig,
+)
 from .filesystem import PART_SUFFIX, log
-from .transport import FtpTransport, LocalTransport, SftpTransport, Transport
+from .transport import LocalTransport, Transport, build_transport
 
 
 class WebsiteSource:
     """HTTP(S) download. Plain urllib on purpose: no extra dependency
     for a file fetch, and the agent never needs a browser here."""
 
-    def __init__(self, cfg: dict):
-        self.url = cfg["url"]
-        self.timeout = cfg.get("timeout_seconds", 60)
+    def __init__(self, cfg: WebsiteSourceConfig):
+        self.url = cfg.url
+        self.timeout = cfg.timeout_seconds
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -53,8 +62,8 @@ class WebsiteSource:
 class LocalSource:
     """A file already on disk (a drop-folder, or tests)."""
 
-    def __init__(self, cfg: dict):
-        self.path = Path(cfg["path"])
+    def __init__(self, cfg: LocalSourceConfig):
+        self.path = Path(cfg.path)
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -75,10 +84,10 @@ class DirectorySource:
     as the watcher's outbound batch, in the forward direction.
     """
 
-    def __init__(self, cfg: dict):
-        self.dir = Path(cfg["dir"])
-        self.pattern = cfg.get("pattern", "*")
-        self.min_age = cfg.get("min_age_seconds", 2)
+    def __init__(self, cfg: LocalDirSourceConfig):
+        self.dir = Path(cfg.dir)
+        self.pattern = cfg.pattern
+        self.min_age = cfg.min_age_seconds
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -100,27 +109,40 @@ class DirectorySource:
         return staged
 
 
-def build_source(cfg: dict) -> Source:
-    kind = cfg["type"]
-    if kind == "website":
-        return WebsiteSource(cfg)
-    if kind == "local":
-        return LocalSource(cfg)
-    if kind == "local-dir":
-        return DirectorySource(cfg)
-    if kind == "remote-dir":
-        return RemoteDirectorySource(cfg)
-    if kind == "smb":
+def build_source(
+    source: SourceConfig,
+    job: str,
+    kind: str | None = None,
+    variables: dict | None = None,
+    date_format: str = "%Y%m%d",
+    time_format: str = "%H%M%S",
+) -> Source:
+    """Build a source from a parsed ``source`` section. ``job``,
+    ``kind``, ``variables`` and the date/time formats are the
+    template context a source needs ({job}, {kind}, the job's own
+    tokens, {date}/{time} in the job's formats); sources that do
+    not template anything ignore them. The config parser has
+    already validated the section, so an unknown type cannot reach
+    this function."""
+    if source.type == "website":
+        return WebsiteSource(source)
+    if source.type == "local":
+        return LocalSource(source)
+    if source.type == "local-dir":
+        return DirectorySource(source)
+    if source.type == "remote-dir":
+        return RemoteDirectorySource(source)
+    if source.type == "remote-files":
+        return RemoteFilesSource(source, job, kind, variables, date_format, time_format)
+    if source.type == "smb":
         from .smb_source import SmbSource
 
-        return SmbSource(cfg)
-    if kind == "selenium":
+        return SmbSource(source)
+    if source.type == "selenium":
         from .selenium_source import SeleniumSource
 
-        return SeleniumSource(cfg)
-    raise ValueError(
-        f"unknown source type {kind!r} (want website|local|local-dir|remote-dir|smb|selenium)"
-    )
+        return SeleniumSource(source)
+    raise ValueError(f"unknown source type {source.type!r}")
 
 
 class RemoteDirectorySource:
@@ -142,30 +164,20 @@ class RemoteDirectorySource:
     the "remote" directory is a local folder.
     """
 
-    def __init__(self, cfg: dict, transport: Transport | None = None):
+    def __init__(self, cfg: RemoteDirSourceConfig, transport: Transport | None = None):
         self.cfg = cfg
-        self.remote_dir = cfg["remote_dir"]
-        self.pattern = cfg.get("pattern", "*")
-        self.min_age = cfg.get("min_age_seconds", 5)
+        self.remote_dir = cfg.remote_dir
+        self.pattern = cfg.pattern
+        self.min_age = cfg.min_age_seconds
         self._transport = transport
         self._owns_transport = transport is None
 
     def _open_transport(self) -> Transport:
         if self._transport is not None:
             return self._transport
-        kind = self.cfg.get("transport", "ftp")
-        if kind == "local":
-            return LocalTransport(self.cfg["root"])
-        host = self.cfg["host"]
-        port = self.cfg.get("port", 21 if kind == "ftp" else 22)
-        username = self.cfg.get("username", "")
-        password = os.environ.get(self.cfg.get("password_env", "FILEFLOW_FTP_PASSWORD"), "")
-        if kind == "ftp":
-            return FtpTransport(host, port, username, password)
-        if kind == "sftp":
-            key_file = os.environ.get(self.cfg.get("key_file_env", "FILEFLOW_SFTP_KEY_FILE"))
-            return SftpTransport(host, port, username, password or None, key_file)
-        raise ValueError(f"unknown remote-dir transport {kind!r} (want local|ftp|sftp)")
+        if self.cfg.transport.kind == "local":
+            return LocalTransport(self.cfg.transport.root)
+        return build_transport(self.cfg.transport)
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -184,6 +196,84 @@ class RemoteDirectorySource:
                     log.warning("source %s: empty file, skipped", name)
                     continue
                 transport.download(self.remote_dir, name, dest_dir / name)
+                staged.append(dest_dir / name)
+            return staged
+        finally:
+            if self._owns_transport:
+                transport.close()
+
+
+class RemoteFilesSource:
+    """Fetch named files from a remote server (FTP/SFTP).
+
+    ``files`` is a list of {"directory", "name"} templates, rendered
+    per run from the run date ({year} {month} {day}) and job-level
+    values ({job}, {kind} -- the job's kind). All of them
+    are one batch under one manifest. Every listed file is required:
+    a missing, empty, or still-being-written file fails the run
+    loud instead of uploading a partial batch -- a named file was
+    explicitly asked for, so its absence is an error, not "no files".
+
+    Connection comes from the source config; the password resolves
+    the same way as the upload transport (env var first, literal
+    ``password`` as fallback). ``transport: "local"`` (with ``root``)
+    is the pilot/test mode. The transport is opened here and closed
+    before download() returns.
+    """
+
+    def __init__(
+        self,
+        cfg: RemoteFilesSourceConfig,
+        job: str,
+        kind: str | None = None,
+        variables: dict | None = None,
+        date_format: str = "%Y%m%d",
+        time_format: str = "%H%M%S",
+        transport: Transport | None = None,
+    ):
+        self.cfg = cfg
+        self.job = job
+        self.kind = kind
+        self.variables = variables or {}
+        self.date_format = date_format
+        self.time_format = time_format
+        self.files = cfg.files
+        if not self.files:
+            raise ValueError("remote-files source needs a non-empty 'files' list")
+        self.min_age = cfg.min_age_seconds
+        self._transport = transport
+        self._owns_transport = transport is None
+
+    def _open_transport(self) -> Transport:
+        if self._transport is not None:
+            return self._transport
+        if self.cfg.transport.kind == "local":
+            return LocalTransport(self.cfg.transport.root)
+        return build_transport(self.cfg.transport)
+
+    def download(self, dest_dir: Path, run_id: str) -> list[Path]:
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        context = template_context(
+            self.job, self.kind, self.variables, self.date_format, self.time_format
+        )
+        transport = self._open_transport()
+        try:
+            staged: list[Path] = []
+            for entry in self.files:
+                remote_dir = render_template(entry.directory, context)
+                name = render_template(entry.name, context)
+                if "/" in name or "\\" in name:
+                    raise ValueError(f"remote-files: name template produced a path: {name!r}")
+                where = f"{remote_dir}/{name}"
+                size = transport.remote_size(remote_dir, name)
+                if size is None:
+                    raise ValueError(f"remote-files: file not found: {where}")
+                if size == 0:
+                    raise ValueError(f"remote-files: file is empty: {where}")
+                mtime = transport.remote_mtime(remote_dir, name)
+                if mtime is not None and time.time() - mtime < self.min_age:
+                    raise ValueError(f"remote-files: file still being written: {where}")
+                transport.download(remote_dir, name, dest_dir / name)
                 staged.append(dest_dir / name)
             return staged
         finally:

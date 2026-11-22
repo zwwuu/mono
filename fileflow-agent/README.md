@@ -24,7 +24,10 @@ batch. The source is one file (`website` URL, `local` path), every
 stable file matching a glob in a drop folder (`local-dir` with
 `dir` + `pattern`, skipping `.part`, still-being-written, and empty
 files), every stable file in a remote directory (`remote-dir` over
-FTP/SFTP, same selection rules), every stable file on a Windows
+FTP/SFTP, same selection rules), the named files in a `files`
+list (`remote-files` over FTP/SFTP — each entry a `directory` +
+`name` template rendered per run from the run date and job-level
+values, every listed file required), every stable file on a Windows
 share (`smb`, via `smbprotocol`), or the downloads produced by
 driving a portal in Chrome (`selenium`, an action script of
 goto/fill/click/wait/wait_for/download — the same action language
@@ -40,9 +43,11 @@ Playwright):
    what the watcher verifies. The idempotency key is `job|run_id`:
    the run_id is the run's identity.
 5. Upload every output file, then the manifest *last*, via `.part` +
-   rename, to `incoming/<job>/` on the FTP server. The manifest
-   rename is the trigger that tells the watcher the batch is
-   complete.
+   rename, to the destination directory — `destination.directory`
+   when the config names one (a templated directory, e.g. a
+   date-partitioned inbox for a direct drop with no watcher), else
+   `incoming/<job>/` on the FTP server. The manifest rename is the
+   trigger that tells the watcher the batch is complete.
 6. Verify the remote sizes, then delete the staging copy. The
    staging copy is kept until the upload is verified.
 
@@ -74,19 +79,23 @@ src/fileflow_agent/
   domain/          pure business rules (stdlib only, no I/O)
     entities.py    RunRecord, run states (Manifest lives in fileflow-contract)
     ports.py       RunRepository / Transport / Source / WebsiteUploader
-    integrity.py   rename rules (safe_name, render_name)
+    integrity.py   rename rules (safe_name, render_name) + template
+                   rendering (template_context, render_template)
     procedures.py  procedure registry + built-ins
                    (rename-only, normalize-csv, uppercase-headers-csv)
   application/     use cases, written only against domain ports
     download.py    DownloadAndUploadUseCase (website/local -> FTP)
     pickup.py      PickupUseCase (FTP outgoing -> website)
   infrastructure/  the outside world, behind the ports
+    config.py      config parser: JSON dict -> typed config, fails
+                   loud at startup with every problem listed
     filesystem.py  sha256, manifest I/O, atomic .part+rename
     persistence.py SQLAlchemy run ledger (RunRepository) + Alembic model
     transport.py   uploads/downloads: local (tests/pilot), ftp, sftp (paramiko);
                    remote_mtime (MDTM on FTP, stat on SFTP/local)
     sources.py     WebsiteSource, LocalSource, DirectorySource,
-                   RemoteDirectorySource (remote-dir over a transport)
+                   RemoteDirectorySource (remote-dir over a transport),
+                   RemoteFilesSource (remote-files: named templated files)
     smb_source.py  SmbSource (Windows share via smbprotocol)
     selenium_source.py  SeleniumSource (Chrome action script) + selector
                    registry (css/text/role/label/placeholder/testid/
@@ -96,10 +105,12 @@ src/fileflow_agent/
     cli.py         composition root: builds use cases from config
 config/agent.example.json   copy to agent.json and fill in
 config/agent-remote-dir.example.json   remote-dir source example
+config/agent-remote-files.example.json   remote-files source + destination example
 config/agent-smb-source.example.json   smb source example
 config/agent-selenium-source.example.json   selenium source example
 tests/test_agent.py         upload + pickup tests (no watcher code)
 tests/test_sources.py       remote-dir / smb / selenium sources (fakes)
+tests/test_config.py        config parser: valid shapes, every failure mode
 ```
 
 ## Architecture
@@ -131,24 +142,78 @@ Wired Ethernet only; Wi-Fi off; static IP or DHCP reservation.
 
 ```bash
 cp config/agent.example.json config/agent.json
-# edit: source.url, job, rename_pattern, ftp host/transport, pickup.upload_url
+# edit: source.url, job, rename_pattern, ftp host/transport, deliver.upload_url
 export FILEFLOW_FTP_PASSWORD='...'    # or FILEFLOW_SFTP_KEY_FILE
 export FILEFLOW_UPLOAD_TOKEN='...'     # pickup mode only, if the site needs it
 fileflow-agent --config config/agent.json --mode both --loop 300
 ```
 
 Run it as a service (`systemd` unit on Linux, scheduled task on
-Windows) so it restarts on boot. Secrets come from env vars,
-never from the config file.
+Windows) so it restarts on boot. Secrets come from env vars first
+(`password_env`, default `FILEFLOW_FTP_PASSWORD`); a literal
+`password` in the config is accepted as a fallback, but it sits in
+a file, so prefer the env var.
 
 ## Configuration (`config/agent.json`)
 
-`job`, `source`, `expect_csv`, `agent_procedure`, `rename_pattern`
-(tokens `{date} {time} {name} {ext} {job} {run_id}`), `staging_dir`,
-`ledger_db`, `ftp` (`transport: local|ftp|sftp`, `host`, `port`,
-`username`; for `local`, `root` is the simulated FTP root), and
-`pickup` (`jobs`, `upload_url`, `field`, `auth_env`,
+The config file is parsed once, at startup, before any run starts
+(`infrastructure/config.py`): the raw JSON becomes a typed config
+(one dataclass per source type, a transport dataclass shared by
+`destination` and the remote sources), and anything wrong raises
+one `ConfigError` listing *every* problem found -- missing keys,
+wrong types, unknown keys, unknown source/transport kinds, unknown
+template tokens, out-of-range values -- instead of failing on the
+first one, or halfway through a run with a bare `KeyError`. Check a
+config without running it:
+
+```bash
+fileflow-agent --config config/agent.json --check-config   # exit 0 when valid, 2 with the problems listed
+```
+
+A config without a `source` section is valid (a pickup-only job);
+running it in download mode fails loud at startup instead. Unknown
+keys are rejected everywhere, so a typo like `destinaton` fails at
+startup rather than silently doing nothing. The parser checks shape
+only: it does not check that a named env var is set, and it does
+not connect to anything.
+
+`job`, `kind` (optional job-level value, usable as a `{kind}` token
+in templates), `variables` (the job's own arbitrary template
+tokens, name -> string), `date_format` / `time_format` (strftime,
+defaults `%Y%m%d` / `%H%M%S`, driving the `{date}` / `{time}`
+tokens), `source`, `expect_csv`, `procedure`,
+`rename_pattern` (tokens `{date} {time} {name} {ext} {job}
+{run_id}`, plus the job's `variables`), `staging_dir`, `ledger_db`,
+`destination` (`transport: local|ftp|sftp`, `host`, `port`,
+`username`, and an optional `directory` template for the upload
+target), and `deliver` (`upload_url`, `field`, `auth_env`,
 `timeout_seconds`).
+
+The filename render is the job's business logic, not the
+framework's: each job has its own datetime format and its own
+arbitrary variables, and the parser validates templates against
+the context built from that job's config -- so a typo still fails
+at startup, but a future app's own tokens are never "unknown". A
+variable name must be an identifier and must not collide with a
+built-in token (`year`, `month`, `day`, `date`, `time`, `job`,
+`kind`, `name`, `ext`, `run_id`).
+
+`destination` is the upload transport everywhere, for both
+download and pickup (one server per config, both directions), and
+it is required -- a config without it fails loud. `destination.directory`
+sets the upload target: when present the outputs + manifest go to
+that templated directory (a direct drop, no watcher); when absent
+they go to `incoming/<job>/`, which the watcher scans. Only set
+`directory` for a direct drop -- a watcher-flow config must leave
+it out, or the watcher never sees the uploads.
+
+Templates (`remote-files` directory/name, `destination.directory`,
+`rename_pattern`) render per run from the job's own context:
+`{year}` `{month}` `{day}` (the run date's components, local
+time), `{date}` `{time}` (in the job's `date_format` /
+`time_format`), `{job}`, `{kind}` (from the job config's `kind`),
+and the job's `variables`. An unknown token fails the run loud
+instead of leaving `{token}` in a path.
 
 `source` is one of:
 - `website`: `url`, `timeout_seconds` (default 60).
@@ -160,11 +225,17 @@ never from the config file.
   `key_file_env` (default `FILEFLOW_SFTP_KEY_FILE`), `remote_dir`,
   `pattern` (default `*`), `min_age_seconds` (default 5). For
   `local`, `root` is the remote root (pilot/test mode).
+- `remote-files`: `transport` (`ftp`/`sftp`/`local`), `host`, `port`,
+  `username`, `password_env`, `key_file_env`, `min_age_seconds`
+  (default 5), `files` (a non-empty list of `directory` + `name`
+  templates). Every listed file is required: a missing, empty, or
+  still-being-written file fails the run loud instead of uploading
+  a partial batch. See `config/agent-remote-files.example.json`.
 - `smb`: `server`, `share`, `path`, `username`, `password_env`
   (default `FILEFLOW_SMB_PASSWORD`), `pattern` (default `*`),
   `min_age_seconds` (default 5).
 - `selenium`: `actions` (goto/fill/click/wait/wait_for/download;
-  `fill` takes `value` or `secret`, an env var name), `headless`
+  `fill` takes `value` or `secret_env`, an env var name), `headless`
   (default true), `timeout_seconds` (default 60), `chrome_binary`
   (optional). Selectors are a CSS string or an object with a
   `kind`: css/text/role/label/placeholder/testid/xpath/row/chain.
@@ -205,13 +276,18 @@ ruff check src tests
 ruff format --check src tests
 ``````
 
-17 tests, using the `local` transport and a local HTTP server
+60 tests, using the `local` transport and a local HTTP server
 standing in for the website (`test_agent.py`: agent upload with
 file + manifest, hash verifies; pickup upload to the website,
 outgoing cleared; a corrupt staged file never uploaded; re-runs
-skip already-processed files), plus the remote sources against
+skip already-processed files; a rename using the job's variables
+and date format), plus the remote sources against
 fakes (`test_sources.py`: remote-dir selection + end-to-end skip,
-SMB selection, Selenium action flow / selectors / validation /
-download timeout). The Selenium tests drive a fake in-memory DOM,
-not a real Chrome — the real-browser path needs Chrome on the PC
-and is not covered here.
+remote-files named-file fetching + direct-drop end-to-end,
+template/password helpers, SMB selection, Selenium action flow /
+selectors / validation / download timeout), plus the config parser
+(`test_config.py`: valid shapes and defaults, every failure mode,
+all five example configs parse, `--check-config` exit codes, the
+job's variables and date/time formats). The
+Selenium tests drive a fake in-memory DOM, not a real Chrome — the
+real-browser path needs Chrome on the PC and is not covered here.
