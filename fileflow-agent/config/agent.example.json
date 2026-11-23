@@ -1,25 +1,33 @@
 {
-  "deliver": {
-    "auth_env": "FILEFLOW_UPLOAD_TOKEN",
-    "field": "file",
-    "timeout_seconds": 60,
-    "upload_url": "https://example.com/upload"
-  },
-  "destination": {
-    "host": "192.168.10.20",
-    "port": 22,
-    "transport": "sftp",
-    "username": "fileflow"
-  },
-  "expect_csv": true,
-  "job": "daily-report",
-  "ledger_db": "/var/lib/fileflow-agent/agent.db",
-  "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
-  "source": {
-    "timeout_seconds": 60,
-    "type": "website",
-    "url": "https://example.com/reports/daily.csv"
-  },
-  "staging_dir": "/var/lib/fileflow-agent/staging"
+    "deliver": {
+        "auth_env": "FILEFLOW_UPLOAD_TOKEN",
+        "form_field": "file",
+        "timeout_seconds": 60,
+        "upload_url": "https://example.com/upload"
+    },
+    "destination": {
+        "host": "192.168.10.20",
+        "port": 22,
+        "transport": "sftp",
+        "username": "fileflow"
+    },
+    "expect_csv": true,
+    "job": "daily-report",
+    "ledger_db": "/var/lib/fileflow-agent/agent.db",
+    "log_file": "/var/lib/fileflow-agent/agent.log",
+    "notify": {
+        "from": "agent@example.com",
+        "password_env": "FILEFLOW_SMTP_PASSWORD",
+        "smtp_host": "smtp.example.com",
+        "smtp_port": 587,
+        "to": "ops@example.com"
+    },
+    "procedure": "normalize-csv",
+    "rename_pattern": "{date}_{name}{ext}",
+    "source": {
+        "timeout_seconds": 60,
+        "type": "website",
+        "url": "https://example.com/reports/daily.csv"
+    },
+    "staging_dir": "/var/lib/fileflow-agent/staging"
 }

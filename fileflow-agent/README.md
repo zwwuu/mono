@@ -29,10 +29,14 @@ list (`remote-files` over FTP/SFTP — each entry a `directory` +
 `name` template rendered per run from the run date and job-level
 values, every listed file required), every stable file on a Windows
 share (`smb`, via `smbprotocol`), or the downloads produced by
-driving a portal in Chrome (`selenium`, an action script of
-goto/fill/click/wait/wait_for/download — the same action language
-as the monorepo FileFlow browser source, on Selenium instead of
-Playwright):
+driving a portal — `selenium` in the PC's Chrome, or `playwright`
+in Playwright's bundled Chromium. Both take the same action script
+(goto/fill/click/wait/wait_for/download) and the same selector
+kinds as the monorepo FileFlow browser source. Playwright is the
+better default: no chromedriver to match to Chrome, and downloads
+arrive via `page.expect_download()` instead of polling a download
+directory. Selenium stays for portals that need the real installed
+Chrome (a user profile, extensions, corporate SSO):
 1. Download the source file(s) to `<staging>/<run_id>` — `.part` +
    rename, never process a partial download.
 2. Validate each one (non-empty; CSV must parse when `expect_csv`).
@@ -47,17 +51,29 @@ Playwright):
    when the config names one (a templated directory, e.g. a
    date-partitioned inbox for a direct drop with no watcher), else
    `incoming/<job>/` on the FTP server. The manifest rename is the
-   trigger that tells the watcher the batch is complete.
-6. Verify the remote sizes, then delete the staging copy. The
-   staging copy is kept until the upload is verified.
+   trigger that tells the watcher the batch is complete. Multi-file
+   batches upload concurrently (4 workers, each with its own
+   transport connection); the manifest still goes last, alone.
+6. Verify what landed, then delete the staging copy: size first,
+   then SHA-256 by downloading each file back (FTP has no remote
+   hash command). A size mismatch raises OSError and the upload is
+   retried; a hash mismatch raises ValueError and fails the run
+   immediately. The staging copy is kept until the upload is
+   verified. A transient failure (OSError) anywhere in the run is
+   retried up to 3 times with exponential backoff (1s, 2s) before
+   the run fails. Each run logs one summary line — files, total
+   bytes, duration, destination — and the completion email carries
+   the same summary.
 
 A run records itself UPLOADED with the list of files it uploaded
 (job + name + hash each). The next run skips any file already in
 that list — a re-run, a re-drop, or a loop pass over an unchanged
 drop folder does not upload it again. A file whose content changed
 has a new hash, so it is processed. If nothing is fresh, the run
-is SKIPPED: no manifest, no upload, no new ledger row. Files from
-a failed run are not recorded, so they retry.
+is SKIPPED: no manifest, no upload, no new ledger row. An empty
+download is SKIPPED the same way — an empty drop folder, or a
+remote-files list whose entries are all optional and none was
+ready. Files from a failed run are not recorded, so they retry.
 
 **Pickup mode** (`--mode pickup`): the reverse flow. For each
 batch manifest in `outgoing/<job>/` it waits until **every** file
@@ -100,6 +116,9 @@ src/fileflow_agent/
     selenium_source.py  SeleniumSource (Chrome action script) + selector
                    registry (css/text/role/label/placeholder/testid/
                    xpath/row/chain, same shapes as the monorepo browser source)
+    playwright_source.py  PlaywrightSource (same action script and
+                   selector registry, on Playwright's bundled
+                   Chromium; downloads via page.expect_download())
     website.py     WebsiteUploader (multipart POST)
   adapters/
     cli.py         composition root: builds use cases from config
@@ -108,8 +127,9 @@ config/agent-remote-dir.example.json   remote-dir source example
 config/agent-remote-files.example.json   remote-files source + destination example
 config/agent-smb-source.example.json   smb source example
 config/agent-selenium-source.example.json   selenium source example
+config/agent-playwright-source.example.json   playwright source example
 tests/test_agent.py         upload + pickup tests (no watcher code)
-tests/test_sources.py       remote-dir / smb / selenium sources (fakes)
+tests/test_sources.py       remote-dir / smb / selenium / playwright sources (fakes)
 tests/test_config.py        config parser: valid shapes, every failure mode
 ```
 
@@ -133,6 +153,7 @@ pip install -e .
 # Optional, per source/transport used:
 pip install -e ".[sftp]"      # SFTP transport, remote-dir over SFTP
 pip install -e ".[selenium]"  # selenium source (Chrome must be installed too)
+pip install -e ".[playwright]"  # playwright source, then: playwright install chromium
 pip install -e ".[smb]"       # smb source
 ```
 
@@ -177,17 +198,17 @@ startup rather than silently doing nothing. The parser checks shape
 only: it does not check that a named env var is set, and it does
 not connect to anything.
 
-`job`, `kind` (optional job-level value, usable as a `{kind}` token
+`job`, `category` (optional job-level value, usable as a `{category}` token
 in templates), `variables` (the job's own arbitrary template
 tokens, name -> string), `date_format` / `time_format` (strftime,
 defaults `%Y%m%d` / `%H%M%S`, driving the `{date}` / `{time}`
-tokens), `source`, `expect_csv`, `procedure`,
-`rename_pattern` (tokens `{date} {time} {name} {ext} {job}
-{run_id}`, plus the job's `variables`), `staging_dir`, `ledger_db`,
+tokens), `source`, `expect_csv`, `procedure`, `procedures_module`
+(see below), `rename_pattern` (tokens `{date} {time} {name} {ext}
+{job} {run_id}`, plus the job's `variables`), `staging_dir`, `ledger_db`,
 `destination` (`transport: local|ftp|sftp`, `host`, `port`,
 `username`, and an optional `directory` template for the upload
-target), and `deliver` (`upload_url`, `field`, `auth_env`,
-`timeout_seconds`).
+target), `deliver` (`upload_url`, `form_field`, `auth_env`,
+`timeout_seconds`), `notify` (see below), and `log_file` (see below).
 
 The filename render is the job's business logic, not the
 framework's: each job has its own datetime format and its own
@@ -196,7 +217,22 @@ the context built from that job's config -- so a typo still fails
 at startup, but a future app's own tokens are never "unknown". A
 variable name must be an identifier and must not collide with a
 built-in token (`year`, `month`, `day`, `date`, `time`, `job`,
-`kind`, `name`, `ext`, `run_id`).
+`category`, `name`, `ext`, `run_id`).
+
+Custom procedures live outside the agent: write them in a module
+next to the config (e.g. `procedures_local.py`), register each with
+`register_procedure(name, version, fn)`, and set
+`"procedures_module": "procedures_local"` in the config. The agent
+imports the module before parsing, so the custom name validates
+at startup like a built-in. A procedure is
+`(input_path, workdir, ctx) -> output_path`: read the input, write
+a new file into the workdir, return it; never edit the input in
+place; raise on bad input. The agent runs the procedure first,
+then applies `rename_pattern` to the procedure's output name — so
+a procedure that renames by business logic pairs with
+`rename_pattern: "{name}{ext}"`, which passes its name through
+unchanged. The sample project `fileflow-agent-sample-pdf` shows
+the whole shape (playwright scrape, PDF rename, FTP drop).
 
 `destination` is the upload transport everywhere, for both
 download and pickup (one server per config, both directions), and
@@ -211,14 +247,31 @@ Templates (`remote-files` directory/name, `destination.directory`,
 `rename_pattern`) render per run from the job's own context:
 `{year}` `{month}` `{day}` (the run date's components, local
 time), `{date}` `{time}` (in the job's `date_format` /
-`time_format`), `{job}`, `{kind}` (from the job config's `kind`),
+`time_format`), `{job}`, `{category}` (from the job config's `category`),
 and the job's `variables`. An unknown token fails the run loud
 instead of leaving `{token}` in a path.
+
+## Notifications and logs
+
+`notify` sends one email per run when it finishes: UPLOADED (or
+UPLOADED_TO_WEBSITE in pickup mode) and FAILED, naming the job,
+run_id, files, and destination — a failure names the failed step
+or file. SKIPPED sends nothing, so a `--loop` tick with nothing
+new stays silent. The section is optional; without it outcomes are
+only logged. Shape: `smtp_host`, `smtp_port` (default 587,
+STARTTLS), `from`, `to`, `password_env` (the SMTP password comes
+from that env var, never from the config; the login username is
+the `from` address). A dead mail server never fails the run — the
+failure is logged and the run's own outcome stands.
+
+`log_file` is a path for a rotating file log (midnight rotation, 7
+backups) carrying the same records as the console. Without it the
+agent logs to the console only.
 
 `source` is one of:
 - `website`: `url`, `timeout_seconds` (default 60).
 - `local`: `path`.
-- `local-dir`: `dir`, `pattern` (default `*`), `min_age_seconds`
+- `local-dir`: `directory`, `pattern` (default `*`), `min_age_seconds`
   (default 2).
 - `remote-dir`: `transport` (`ftp`/`sftp`/`local`), `host`, `port`,
   `username`, `password_env` (default `FILEFLOW_FTP_PASSWORD`),
@@ -228,18 +281,29 @@ instead of leaving `{token}` in a path.
 - `remote-files`: `transport` (`ftp`/`sftp`/`local`), `host`, `port`,
   `username`, `password_env`, `key_file_env`, `min_age_seconds`
   (default 5), `files` (a non-empty list of `directory` + `name`
-  templates). Every listed file is required: a missing, empty, or
+  templates, each optionally with `"optional": true`). Every listed
+  file is required by default: a missing, empty, or
   still-being-written file fails the run loud instead of uploading
-  a partial batch. See `config/agent-remote-files.example.json`.
+  a partial batch. An optional file that is missing, empty, or
+  still being written is logged and skipped, and the batch ships
+  without it; if every entry is optional and none is ready, the
+  run is SKIPPED. See `config/agent-remote-files.example.json`.
 - `smb`: `server`, `share`, `path`, `username`, `password_env`
   (default `FILEFLOW_SMB_PASSWORD`), `pattern` (default `*`),
   `min_age_seconds` (default 5).
 - `selenium`: `actions` (goto/fill/click/wait/wait_for/download;
   `fill` takes `value` or `secret_env`, an env var name), `headless`
-  (default true), `timeout_seconds` (default 60), `chrome_binary`
+  (default true), `timeout_seconds` (default 60), `executable_path`
   (optional). Selectors are a CSS string or an object with a
   `kind`: css/text/role/label/placeholder/testid/xpath/row/chain.
   See `config/agent-selenium-source.example.json`.
+- `playwright`: the same `actions` and selector kinds as `selenium`,
+  on Playwright's bundled Chromium instead of the PC's Chrome.
+  `headless` (default true), `timeout_seconds` (default 60),
+  `executable_path` (optional — a non-bundled browser binary).
+  Install with `pip install -e ".[playwright]"`, then
+  `playwright install chromium` once on the PC.
+  See `config/agent-playwright-source.example.json`.
 
 
 ## Database migrations (Alembic)
@@ -276,7 +340,7 @@ ruff check src tests
 ruff format --check src tests
 ``````
 
-60 tests, using the `local` transport and a local HTTP server
+113 tests, using the `local` transport and a local HTTP server
 standing in for the website (`test_agent.py`: agent upload with
 file + manifest, hash verifies; pickup upload to the website,
 outgoing cleared; a corrupt staged file never uploaded; re-runs
@@ -284,10 +348,29 @@ skip already-processed files; a rename using the job's variables
 and date format), plus the remote sources against
 fakes (`test_sources.py`: remote-dir selection + end-to-end skip,
 remote-files named-file fetching + direct-drop end-to-end,
+optional-file skips (missing / empty / still-being-written, all
+optional missing skips the run, a required file still fails loud)
++ an empty local-dir skips the run,
 template/password helpers, SMB selection, Selenium action flow /
-selectors / validation / download timeout), plus the config parser
-(`test_config.py`: valid shapes and defaults, every failure mode,
-all five example configs parse, `--check-config` exit codes, the
-job's variables and date/time formats). The
+selectors / validation / download timeout, Playwright action flow /
+selectors / validation / download timeout on the same fake DOM),
+plus the config parser (`test_config.py`: valid shapes and defaults,
+every failure mode, all six example configs parse, `--check-config`
+exit codes, the job's variables and date/time formats, a custom
+procedure loaded via `procedures_module`, `notify` and `log_file`
+parsing), plus notification and logging (`test_notify.py`: email on
+UPLOADED and FAILED with a fake SMTP, none on SKIPPED or DUPLICATE,
+none without a `notify` section, a dead mail server does not fail
+the run, pickup emails, the file log receives the agent's records
+and is absent without `log_file`), plus transfer quality
+(`test_transfer_quality.py`: hash/size mismatch after upload
+raises and no manifest follows, transient failures retry with
+backoff and validation errors never retry, multi-file uploads run
+concurrently, and the per-run summary lands in the log and the
+completion email). The
 Selenium tests drive a fake in-memory DOM, not a real Chrome — the
 real-browser path needs Chrome on the PC and is not covered here.
+The Playwright tests also cover the real path: one end-to-end test
+launches Chromium against a local HTTP portal and downloads through
+`expect_download` (the browser binaries live in
+`~/.cache/ms-playwright` on the build machine).

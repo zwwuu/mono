@@ -9,7 +9,11 @@ Every upload follows the same contract, whatever the transport:
   2. rename ``<name>.part`` -> ``<name>``  (atomic on FTP/SFTP/local)
   3. upload the manifest the same way, *last* -- its rename is the
      trigger that tells the watcher the transfer is complete.
-  4. verify size (and, for SFTP/local, hash) of what landed.
+  4. verify size, then SHA-256 (download-back), of what landed.
+
+Multi-file batches upload concurrently (4 workers, each with its
+own transport clone -- FTP/SFTP connections are not shareable
+across threads); the manifest still goes last, alone.
 
 Transports:
   * ``local`` -- plain filesystem copy. For tests / pilot only, where
@@ -24,8 +28,12 @@ from __future__ import annotations
 import ftplib
 import os
 import shutil
+import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
+
+from fileflow_contract import sha256_file
 
 from .config import TransportConfig
 from .filesystem import PART_SUFFIX, log
@@ -60,6 +68,50 @@ class Transport:
     def close(self) -> None:
         pass
 
+    def clone(self) -> Transport:
+        """A fresh transport of the same kind, for a worker thread:
+        FTP/SFTP connections are not shareable across threads, so
+        each parallel upload gets its own connection."""
+        raise NotImplementedError
+
+    def upload_verified(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
+        """Upload one file and verify what landed: size first (fast
+        fail), then SHA-256 by downloading it back -- FTP has no
+        remote hash command, so download-back is the only way. A
+        size mismatch raises OSError (a truncated upload may succeed
+        on retry); a hash mismatch raises ValueError (verification
+        failed deterministically -- retrying would fail the same way,
+        so the retry helper does not retry it)."""
+        self.upload(local_path, remote_dir, remote_name)
+        self._verify_size(local_path, remote_dir, remote_name)
+        self._verify_hash(local_path, remote_dir, remote_name)
+
+    def upload_many(self, files: list[tuple[str | Path, str]], remote_dir: str) -> None:
+        """Upload several files, each verified (size + SHA-256). More
+        than one file goes up concurrently (4 workers, each with its
+        own transport clone); one file uses this transport directly,
+        exactly as before. A failure in any file raises (the first,
+        in order) and the caller uploads no manifest."""
+        if len(files) <= 1:
+            for local_path, remote_name in files:
+                self.upload_verified(local_path, remote_dir, remote_name)
+            return
+        clones: list[Transport] = []
+        try:
+            with ThreadPoolExecutor(max_workers=4) as pool:
+                futures = []
+                for local_path, remote_name in files:
+                    worker = self.clone()
+                    clones.append(worker)
+                    futures.append(
+                        pool.submit(worker.upload_verified, local_path, remote_dir, remote_name)
+                    )
+                for fut in futures:
+                    fut.result()
+        finally:
+            for worker in clones:
+                worker.close()
+
     # -- shared helpers -------------------------------------------------
     def upload_many_with_manifest(
         self,
@@ -69,12 +121,9 @@ class Transport:
     ) -> None:
         """Upload every data file first, manifest last (its rename is
         the trigger that tells the watcher the batch is complete)."""
-        for local_path, remote_name in files:
-            self.upload(local_path, remote_dir, remote_name)
-            self._verify_size(local_path, remote_dir, remote_name)
+        self.upload_many(files, remote_dir)
         manifest_name = Path(manifest_path).name
-        self.upload(manifest_path, remote_dir, manifest_name)
-        self._verify_size(manifest_path, remote_dir, manifest_name)
+        self.upload_verified(manifest_path, remote_dir, manifest_name)
         log.info("uploaded %d file(s) + %s to %s", len(files), manifest_name, remote_dir)
 
     def _verify_size(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
@@ -90,6 +139,21 @@ class Transport:
             raise OSError(
                 f"size mismatch after upload: {remote_name} "
                 f"expected {expected}, remote has {actual}"
+            )
+
+    def _verify_hash(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
+        """Download the remote file back to a temp file and compare
+        its SHA-256 against the local file's. Raises ValueError on a
+        mismatch (see upload_verified for why it is not OSError)."""
+        expected = sha256_file(local_path)
+        with tempfile.TemporaryDirectory() as tmp:
+            probe = Path(tmp) / remote_name
+            self.download(remote_dir, remote_name, probe)
+            actual = sha256_file(probe)
+        if actual != expected:
+            raise ValueError(
+                f"hash mismatch after upload: {remote_name} "
+                f"expected sha256 {expected}, remote has {actual}"
             )
 
 
@@ -113,6 +177,9 @@ class LocalTransport(Transport):
 
     def __init__(self, root: str | Path):
         self.root = Path(root)
+
+    def clone(self) -> Transport:
+        return LocalTransport(self.root)
 
     def _remote(self, remote_dir: str, remote_name: str) -> Path:
         return self.root / remote_dir / remote_name
@@ -150,9 +217,13 @@ class FtpTransport(Transport):
     def __init__(
         self, host: str, port: int = 21, username: str = "", password: str = "", timeout: int = 30
     ):
+        self._connect_args = (host, port, username, password, timeout)
         self.ftp = ftplib.FTP()
         self.ftp.connect(host, port, timeout=timeout)
         self.ftp.login(username, password)
+
+    def clone(self) -> Transport:
+        return FtpTransport(*self._connect_args)
 
     def upload(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
         self.ftp.cwd(remote_dir)
@@ -228,6 +299,7 @@ class SftpTransport(Transport):
             import paramiko
         except ImportError as e:
             raise ImportError("sftp transport needs paramiko: pip install paramiko") from e
+        self._connect_args = (host, port, username, password, key_file, timeout)
         client = paramiko.SSHClient()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         client.connect(
@@ -242,6 +314,9 @@ class SftpTransport(Transport):
         )
         self._client = client
         self.sftp = client.open_sftp()
+
+    def clone(self) -> Transport:
+        return SftpTransport(*self._connect_args)
 
     def upload(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
         part = f"{remote_dir}/{remote_name}{PART_SUFFIX}"

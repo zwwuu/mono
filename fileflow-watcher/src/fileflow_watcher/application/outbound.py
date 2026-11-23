@@ -12,10 +12,10 @@ completes when all its files are uploaded to the website together.
 Files dropped later form a later batch. For each batch, in order:
   1. seal it: one new run_id, one manifest listing ALL the files
      with SHA-256 + size, one idempotency key;
-  2. copy every data file + the manifest to
-     ``<ftp_root>/outgoing/<job>/`` via .part + rename, manifest
-     last (same trigger contract). Each copy is verified by read-back
-     hash as it lands (``atomic_publish``);
+  2. copy every data file + the manifest to FTP 1
+     ``outgoing/<job>/`` via the source transport (.part +
+     rename, manifest last -- the same trigger contract), with
+     the size of each copy verified as it lands;
   3. only then move the SMB originals to
      ``<share_root>/<archive_dir>/<job>/`` -- the move is what
      stops them being picked twice. The archive stays on the share,
@@ -32,6 +32,7 @@ Returns counts, e.g. {"OUTBOUND_READY": 1} for one batch.
 from __future__ import annotations
 
 import itertools
+import tempfile
 import time
 from pathlib import Path
 
@@ -48,17 +49,17 @@ from fileflow_contract import (
     write_manifest,
 )
 
-from ..domain.ports import RunRepository
+from ..domain.ports import RunRepository, Transport
 from ..infrastructure.config import WatcherConfig
-from ..infrastructure.filesystem import PART_SUFFIX, atomic_move, atomic_publish, log
+from ..infrastructure.filesystem import PART_SUFFIX, atomic_move, log
 
 
 class StageOutboundUseCase:
-    def __init__(self, cfg: WatcherConfig, *, repository: RunRepository):
+    def __init__(self, cfg: WatcherConfig, *, repository: RunRepository, intake: Transport):
         self.cfg = cfg
         self.repository = repository
-        self.ftp_root = Path(cfg.ftp_root)
-        self.share_root = Path(cfg.share_root)
+        self.intake = intake
+        self.share_root = Path(cfg.share_root) if cfg.share_root else Path(".")
 
     def _archive(self, src: Path, archive_dir: Path, job: str) -> Path:
         """Move a staged SMB original into the per-job archive dir."""
@@ -77,8 +78,7 @@ class StageOutboundUseCase:
         counts: dict[str, int] = {}
         for job_dir in sorted(requests_dir.iterdir()) if requests_dir.is_dir() else []:
             job = job_dir.name
-            job_cfg = self.cfg.jobs.get(job)
-            if job_cfg is None or not job_cfg.outbound:
+            if job not in self.cfg.jobs:
                 continue
             stable: list[Path] = []
             for src in sorted(job_dir.iterdir()):
@@ -138,15 +138,20 @@ class StageOutboundUseCase:
                 created_at=utcnow_iso(),
                 extra={"source": (f"smb:{outbound_cfg.requests_dir}/{job}/")},
             )
-            out_dir = self.ftp_root / "outgoing" / job
-            out_dir.mkdir(parents=True, exist_ok=True)
+            out_remote = f"outgoing/{job}"
             # Copy every data file first, manifest last, both via .part +
-            # rename. atomic_publish verifies each copy by read-back hash
-            # as it goes, so no second verification pass is needed.
+            # rename. The transport verifies each copy's size as it
+            # lands, so no second verification pass is needed.
             try:
-                for src, _ in fresh:
-                    atomic_publish(src, out_dir / src.name)
-                write_manifest(out_dir / f"{run_id}.manifest.json", manifest)
+                self.intake.makedirs(out_remote)
+                with tempfile.TemporaryDirectory() as tmp:
+                    manifest_path = Path(tmp) / f"{run_id}.manifest.json"
+                    write_manifest(manifest_path, manifest)
+                    self.intake.upload_many_with_manifest(
+                        [(src, src.name) for src, _ in fresh],
+                        manifest_path,
+                        out_remote,
+                    )
             except OSError as e:
                 self.repository.set_state(run_id, "FAILED", reason=str(e))
                 counts["FAILED"] = counts.get("FAILED", 0) + 1
@@ -155,7 +160,7 @@ class StageOutboundUseCase:
             self.repository.set_state(
                 run_id,
                 "OUTBOUND_READY",
-                outgoing=str(out_dir),
+                outgoing=out_remote,
                 files=[{"name": src.name, "sha256": sha} for src, sha in fresh],
             )
             for src, _ in fresh:
@@ -165,7 +170,7 @@ class StageOutboundUseCase:
                 "outbound batch %s staged %d file(s) in %s (run %s)",
                 job,
                 len(fresh),
-                out_dir,
+                out_remote,
                 run_id,
             )
         return counts

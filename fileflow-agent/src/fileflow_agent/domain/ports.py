@@ -63,6 +63,18 @@ class Transport(Protocol):
         the trigger that tells the watcher the batch is complete)."""
         ...
 
+    def upload_verified(self, local_path: str | Path, remote_dir: str, remote_name: str) -> None:
+        """Upload one file and verify what landed (size + SHA-256)."""
+        ...
+
+    def upload_many(self, files: list[tuple[str | Path, str]], remote_dir: str) -> None:
+        """Upload several files, each verified; concurrent above one."""
+        ...
+
+    def clone(self) -> Transport:
+        """A fresh transport of the same kind, for a worker thread."""
+        ...
+
     def close(self) -> None: ...
 
 
@@ -89,3 +101,21 @@ class Procedure(Protocol):
     """A business procedure: read input, write a NEW output file."""
 
     def __call__(self, input_path: Path, workdir: Path, ctx: dict) -> Path: ...
+
+
+class Notifier(Protocol):
+    """Email (or log-only) notification on run completion. One
+    call per run: UPLOADED / UPLOADED_TO_WEBSITE on success,
+    FAILED with the error on failure. SKIPPED is never notified."""
+
+    def notify(
+        self,
+        *,
+        job: str,
+        run_id: str,
+        status: str,
+        files: list[str],
+        destination: str | None = None,
+        error: str | None = None,
+        summary: str | None = None,
+    ) -> None: ...

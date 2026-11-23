@@ -31,7 +31,7 @@ from .filesystem import log
 class WebsiteUploader:
     def __init__(self, cfg: DeliverConfig):
         self.url = cfg.upload_url
-        self.field = cfg.field
+        self.form_field = cfg.form_field
         self.timeout = cfg.timeout_seconds
         self.auth_env = cfg.auth_env
 
@@ -63,7 +63,7 @@ class WebsiteUploader:
             body.extend(f"--{boundary}\r\n".encode())
             ctype = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
             body.extend(
-                f'Content-Disposition: form-data; name="{self.field}";'
+                f'Content-Disposition: form-data; name="{self.form_field}";'
                 f' filename="{file_path.name}"\r\n'.encode()
             )
             body.extend(f"Content-Type: {ctype}\r\n\r\n".encode())

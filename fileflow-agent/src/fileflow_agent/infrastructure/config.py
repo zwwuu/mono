@@ -39,9 +39,20 @@ from typing import ClassVar
 
 from ..domain.integrity import render_name, render_template, template_context
 from ..domain.procedures import get_procedure
+from .playwright_source import PlaywrightSourceError
+from .playwright_source import validate_actions as validate_playwright_actions
 from .selenium_source import SeleniumSourceError, validate_actions
 
-SOURCE_TYPES = ("website", "local", "local-dir", "remote-dir", "remote-files", "smb", "selenium")
+SOURCE_TYPES = (
+    "website",
+    "local",
+    "local-dir",
+    "remote-dir",
+    "remote-files",
+    "smb",
+    "selenium",
+    "playwright",
+)
 TRANSPORT_TYPES = ("local", "ftp", "sftp")
 # Every token the framework itself provides, across directory
 # templates and rename patterns. A job variable colliding with
@@ -53,7 +64,7 @@ TEMPLATE_BUILTINS = {
     "date",
     "time",
     "job",
-    "kind",
+    "category",
     "name",
     "ext",
     "run_id",
@@ -89,6 +100,7 @@ class TransportConfig:
 class RemoteFile:
     directory: str
     name: str
+    optional: bool = False
 
 
 @dataclass(frozen=True)
@@ -107,7 +119,7 @@ class LocalSourceConfig:
 @dataclass(frozen=True)
 class LocalDirSourceConfig:
     type: ClassVar[str] = "local-dir"
-    dir: str = ""
+    directory: str = ""
     pattern: str = "*"
     min_age_seconds: float = 2
 
@@ -147,7 +159,16 @@ class SeleniumSourceConfig:
     actions: tuple[dict, ...] = ()
     headless: bool = True
     timeout_seconds: int = 60
-    chrome_binary: str | None = None
+    executable_path: str | None = None
+
+
+@dataclass(frozen=True)
+class PlaywrightSourceConfig:
+    type: ClassVar[str] = "playwright"
+    actions: tuple[dict, ...] = ()
+    headless: bool = True
+    timeout_seconds: int = 60
+    executable_path: str | None = None
 
 
 SourceConfig = (
@@ -158,6 +179,7 @@ SourceConfig = (
     | RemoteFilesSourceConfig
     | SmbSourceConfig
     | SeleniumSourceConfig
+    | PlaywrightSourceConfig
 )
 
 
@@ -170,23 +192,39 @@ class DestinationConfig:
 @dataclass(frozen=True)
 class DeliverConfig:
     upload_url: str = ""
-    field: str = "file"
+    form_field: str = "file"
     auth_env: str | None = None
     timeout_seconds: int = 60
+
+
+@dataclass(frozen=True)
+class NotifyConfig:
+    """One email per completed run. ``from_addr`` is the config
+    key ``"from"`` (a Python keyword) and the SMTP login username.
+    The password comes from the env var named in ``password_env``,
+    never from the config file."""
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    from_addr: str = ""
+    to: str = ""
+    password_env: str | None = None
 
 
 @dataclass(frozen=True)
 class AgentConfig:
     """One config is one job. ``source`` is None for a pickup-only
     config (no download); ``deliver`` is None when the config has
-    no pickup section."""
+    no pickup section; ``notify`` is None when the config sends no
+    email (outcomes are only logged); ``log_file`` is None for
+    console-only logging."""
 
     job: str
     staging_dir: str
     ledger_db: str
     destination: DestinationConfig
     source: SourceConfig | None = None
-    kind: str | None = None
+    category: str | None = None
     variables: dict[str, str] = field(default_factory=dict)
     date_format: str = "%Y%m%d"
     time_format: str = "%H%M%S"
@@ -194,18 +232,21 @@ class AgentConfig:
     expect_csv: bool = False
     rename_pattern: str = "{date}_{name}{ext}"
     deliver: DeliverConfig | None = None
+    procedures_module: str | None = None
+    notify: NotifyConfig | None = None
+    log_file: str | None = None
 
 
 def source_reference(source: SourceConfig) -> str | None:
     """The manifest's ``source_url``: what the old code read from
-    the raw source dict (``url``, ``path``, or ``dir`` -- in that
-    order). Remote, selenium and smb-with-no-path sources have none."""
+    the raw source dict (``url``, ``path``, or ``directory`` -- in that
+    order). Remote, selenium/playwright and smb-with-no-path sources have none."""
     if isinstance(source, WebsiteSourceConfig):
         return source.url
     if isinstance(source, LocalSourceConfig):
         return source.path
     if isinstance(source, LocalDirSourceConfig):
-        return source.dir
+        return source.directory
     if isinstance(source, SmbSourceConfig):
         return source.path or None
     return None
@@ -356,7 +397,7 @@ class _Parser:
         template: str,
         where: str,
         job: str,
-        kind: str | None,
+        category: str | None,
         variables: dict,
         date_format: str,
         time_format: str,
@@ -365,7 +406,7 @@ class _Parser:
         tokens, where 'unknown' means unknown to this job."""
         try:
             render_template(
-                template, template_context(job, kind, variables, date_format, time_format)
+                template, template_context(job, category, variables, date_format, time_format)
             )
         except ValueError as e:
             self.fail(where, str(e))
@@ -430,7 +471,7 @@ def _parse_source(
     data: object,
     where: str,
     job: str,
-    kind: str | None,
+    category: str | None,
     variables: dict,
     date_format: str,
     time_format: str,
@@ -458,9 +499,9 @@ def _parse_source(
         p._unknown(data, {"type", "path"}, where)
         return LocalSourceConfig(path=p._str(data, "path", where))
     if source_type == "local-dir":
-        p._unknown(data, {"type", "dir", "pattern", "min_age_seconds"}, where)
+        p._unknown(data, {"type", "directory", "pattern", "min_age_seconds"}, where)
         return LocalDirSourceConfig(
-            dir=p._str(data, "dir", where),
+            directory=p._str(data, "directory", where),
             pattern=p._opt_str(data, "pattern", where, default="*"),
             min_age_seconds=p._num(data, "min_age_seconds", where, 2, minimum=0),
         )
@@ -486,18 +527,21 @@ def _parse_source(
                 if not isinstance(entry, dict):
                     p.fail(entry_where, "must be an object")
                     continue
-                p._unknown(entry, {"directory", "name"}, entry_where)
+                p._unknown(entry, {"directory", "name", "optional"}, entry_where)
                 directory = p._str(entry, "directory", entry_where)
                 name = p._str(entry, "name", entry_where)
+                optional = p._bool(entry, "optional", entry_where, False)
                 if "/" in name or "\\" in name:
                     p.fail(entry_where, f"'name' must not contain a path separator, got {name!r}")
                 if directory:
                     p._template(
-                        directory, entry_where, job, kind, variables, date_format, time_format
+                        directory, entry_where, job, category, variables, date_format, time_format
                     )
                 if name:
-                    p._template(name, entry_where, job, kind, variables, date_format, time_format)
-                parsed.append(RemoteFile(directory=directory, name=name))
+                    p._template(
+                        name, entry_where, job, category, variables, date_format, time_format
+                    )
+                parsed.append(RemoteFile(directory=directory, name=name, optional=optional))
         return RemoteFilesSourceConfig(
             transport=_parse_transport(p, data, where, default_kind="ftp"),
             files=tuple(parsed),
@@ -528,18 +572,37 @@ def _parse_source(
             password_env=p._opt_str(data, "password_env", where),
         )
     # selenium
-    p._unknown(data, {"type", "actions", "headless", "timeout_seconds", "chrome_binary"}, where)
+    if source_type == "selenium":
+        p._unknown(
+            data,
+            {"type", "actions", "headless", "timeout_seconds", "executable_path"},
+            where,
+        )
+        actions = data.get("actions")
+        try:
+            validate_actions(actions)
+        except SeleniumSourceError as e:
+            p.fail(where, str(e))
+            actions = []
+        return SeleniumSourceConfig(
+            actions=tuple(actions) if isinstance(actions, list) else (),
+            headless=p._bool(data, "headless", where, True),
+            timeout_seconds=p._int(data, "timeout_seconds", where, 60, minimum=1),
+            executable_path=p._opt_str(data, "executable_path", where),
+        )
+    # playwright
+    p._unknown(data, {"type", "actions", "headless", "timeout_seconds", "executable_path"}, where)
     actions = data.get("actions")
     try:
-        validate_actions(actions)
-    except SeleniumSourceError as e:
+        validate_playwright_actions(actions)
+    except PlaywrightSourceError as e:
         p.fail(where, str(e))
         actions = []
-    return SeleniumSourceConfig(
+    return PlaywrightSourceConfig(
         actions=tuple(actions) if isinstance(actions, list) else (),
         headless=p._bool(data, "headless", where, True),
         timeout_seconds=p._int(data, "timeout_seconds", where, 60, minimum=1),
-        chrome_binary=p._opt_str(data, "chrome_binary", where),
+        executable_path=p._opt_str(data, "executable_path", where),
     )
 
 
@@ -548,7 +611,7 @@ def _parse_destination(
     data: object,
     where: str,
     job: str,
-    kind: str | None,
+    category: str | None,
     variables: dict,
     date_format: str,
     time_format: str,
@@ -560,7 +623,7 @@ def _parse_destination(
     transport = _parse_transport(p, data, where, default_kind="local")
     directory = p._opt_str(data, "directory", where)
     if directory:
-        p._template(directory, where, job, kind, variables, date_format, time_format)
+        p._template(directory, where, job, category, variables, date_format, time_format)
     return DestinationConfig(transport=transport, directory=directory)
 
 
@@ -568,21 +631,35 @@ def _parse_deliver(p: _Parser, data: object, where: str) -> DeliverConfig:
     if not isinstance(data, dict):
         p.fail(where, "must be an object")
         return DeliverConfig(upload_url="")
-    p._unknown(data, {"upload_url", "field", "auth_env", "timeout_seconds"}, where)
+    p._unknown(data, {"upload_url", "form_field", "auth_env", "timeout_seconds"}, where)
     url = p._str(data, "upload_url", where)
     if url and not url.startswith(("http://", "https://")):
         p.fail(where, f"'upload_url' must start with http:// or https://, got {url!r}")
     return DeliverConfig(
         upload_url=url,
-        field=p._opt_str(data, "field", where, default="file"),
+        form_field=p._opt_str(data, "form_field", where, default="file"),
         auth_env=p._opt_str(data, "auth_env", where),
         timeout_seconds=p._int(data, "timeout_seconds", where, 60, minimum=1),
     )
 
 
+def _parse_notify(p: _Parser, data: object, where: str) -> NotifyConfig:
+    if not isinstance(data, dict):
+        p.fail(where, "must be an object")
+        return NotifyConfig()
+    p._unknown(data, {"smtp_host", "smtp_port", "from", "to", "password_env"}, where)
+    return NotifyConfig(
+        smtp_host=p._str(data, "smtp_host", where),
+        smtp_port=p._int(data, "smtp_port", where, 587, minimum=1, maximum=65535),
+        from_addr=p._str(data, "from", where),
+        to=p._str(data, "to", where),
+        password_env=p._opt_str(data, "password_env", where),
+    )
+
+
 _TOP_KEYS = {
     "job",
-    "kind",
+    "category",
     "variables",
     "date_format",
     "time_format",
@@ -594,6 +671,9 @@ _TOP_KEYS = {
     "source",
     "destination",
     "deliver",
+    "procedures_module",
+    "notify",
+    "log_file",
 }
 
 
@@ -602,9 +682,9 @@ def _parse_agent(p: _Parser, data: dict) -> AgentConfig:
     job = p._str(data, "job", "config")
     if "/" in job or "\\" in job:
         p.fail("config", f"'job' must not contain a path separator, got {job!r}")
-    kind = p._opt_str(data, "kind", "config")
-    if kind is not None and ("/" in kind or "\\" in kind):
-        p.fail("config", f"'kind' must not contain a path separator, got {kind!r}")
+    category = p._opt_str(data, "category", "config")
+    if category is not None and ("/" in category or "\\" in category):
+        p.fail("config", f"'category' must not contain a path separator, got {category!r}")
     variables = p._variables(data, "variables", "config", TEMPLATE_BUILTINS)
     date_format = p._opt_str(data, "date_format", "config", default="%Y%m%d")
     time_format = p._opt_str(data, "time_format", "config", default="%H%M%S")
@@ -631,23 +711,37 @@ def _parse_agent(p: _Parser, data: dict) -> AgentConfig:
     staging_dir = p._str(data, "staging_dir", "config")
     ledger_db = p._str(data, "ledger_db", "config")
     source = (
-        _parse_source(p, data["source"], "source", job, kind, variables, date_format, time_format)
+        _parse_source(
+            p, data["source"], "source", job, category, variables, date_format, time_format
+        )
         if "source" in data
         else None
     )
     destination = _parse_destination(
-        p, data.get("destination"), "destination", job, kind, variables, date_format, time_format
+        p,
+        data.get("destination"),
+        "destination",
+        job,
+        category,
+        variables,
+        date_format,
+        time_format,
     )
     deliver = None
     if "deliver" in data:
         deliver = _parse_deliver(p, data["deliver"], "deliver")
+    procedures_module = p._opt_str(data, "procedures_module", "config")
+    notify = None
+    if "notify" in data:
+        notify = _parse_notify(p, data["notify"], "notify")
+    log_file = p._opt_str(data, "log_file", "config")
     return AgentConfig(
         job=job,
         staging_dir=staging_dir,
         ledger_db=ledger_db,
         source=source,
         destination=destination,
-        kind=kind,
+        category=category,
         variables=variables,
         date_format=date_format,
         time_format=time_format,
@@ -655,6 +749,9 @@ def _parse_agent(p: _Parser, data: dict) -> AgentConfig:
         expect_csv=expect_csv,
         rename_pattern=pattern,
         deliver=deliver,
+        procedures_module=procedures_module,
+        notify=notify,
+        log_file=log_file,
     )
 
 
@@ -675,14 +772,14 @@ def parse_source(data: object) -> SourceConfig:
     """Parse one ``source`` section on its own (tests, and anything
     that builds a source without a whole config). Templates are
     checked against dummy job/kind values: only unknown tokens
-    other than {job}/{kind} are reported here."""
+    other than {job}/{category} are reported here."""
     p = _Parser()
     src = _parse_source(
         p,
         data,
         "source",
         job="job",
-        kind="kind",
+        category="category",
         variables={},
         date_format="%Y%m%d",
         time_format="%H%M%S",
@@ -700,11 +797,20 @@ def parse_transport(data: object, *, default_kind: str = "ftp") -> TransportConf
 
 
 def load_config(path: str | Path) -> AgentConfig:
-    """Read a config file (JSON) and parse it. A malformed file or
-    an invalid config raises ConfigError with the reason."""
+    """Read a config file (JSON), import its optional procedures
+    module, and parse it. A malformed file, a missing procedures
+    module, or an invalid config raises with the reason."""
     path = Path(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as e:
         raise ConfigError(f"config file {path} is not valid JSON: {e}") from e
+    if not isinstance(raw, dict):
+        raise ConfigError(f"config must be an object, got {type(raw).__name__}")
+    # Optional local procedures file: extra business procedures that
+    # live next to the config, imported without touching this agent.
+    # Imported BEFORE parsing, so a custom procedure name validates.
+    extra = raw.get("procedures_module")
+    if extra:
+        __import__(extra)
     return parse_config(raw)

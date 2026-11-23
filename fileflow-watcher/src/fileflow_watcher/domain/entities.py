@@ -9,6 +9,17 @@ The transfer manifest itself lives in the shared ``fileflow_contract``
 package (``Manifest``, ``ManifestFile``, ``MANIFEST_VERSION``), not
 here: it is the contract with the other side, and other projects
 need it too.
+
+Run states, forward flow (FTP 1 -> FTP 2 handoff):
+  RECEIVED            claimed, handoff not finished yet
+  SENT_TO_PROCESSING  files copied to FTP 2, awaiting the processor
+  COMPLETED           every file landed in success/ on FTP 2
+  FAILED              a file failed (processor failed/ or hash
+                      mismatch), or the batch dead-lettered
+  QUARANTINED         hash/size mismatch against the manifest --
+                      never copied to FTP 2
+  DUPLICATE           re-dropped file already recorded: archived
+                      on FTP 1 without copying again
 """
 
 from __future__ import annotations
@@ -17,11 +28,8 @@ from dataclasses import dataclass
 
 STATES = (
     "RECEIVED",
-    "VERIFIED",
-    "PROCESSING",
-    "PROCESSED",
-    "PUBLISHED",
-    "UPLOADED",
+    "SENT_TO_PROCESSING",
+    "COMPLETED",
     "FAILED",
     "QUARANTINED",
     "DUPLICATE",

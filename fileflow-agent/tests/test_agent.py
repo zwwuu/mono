@@ -135,7 +135,7 @@ def _agent_dir_cfg(tmp_path: Path, source_dir: Path) -> dict:
     cfg = _agent_cfg(tmp_path, source_dir / "placeholder.csv")
     cfg["source"] = {
         "type": "local-dir",
-        "dir": str(source_dir),
+        "directory": str(source_dir),
         "pattern": "*.csv",
         "min_age_seconds": 0,
     }
@@ -215,7 +215,7 @@ def _pickup_cfg(tmp_path: Path, port: int) -> dict:
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
         "deliver": {
             "upload_url": f"http://127.0.0.1:{port}/upload",
-            "field": "file",
+            "form_field": "file",
         },
     }
 

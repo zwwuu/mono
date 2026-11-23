@@ -12,6 +12,7 @@ import csv
 import logging
 import os
 import shutil
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from fileflow_contract import sha256_file
@@ -20,12 +21,32 @@ PART_SUFFIX = ".part"
 
 log = logging.getLogger("fileflow_watcher")
 
+# File handlers already attached, by resolved path: setup_logging is
+# idempotent per file, so a second call (or a second scan pass in
+# the same process) never double-logs to the same file.
+_FILE_HANDLERS: set[str] = set()
 
-def setup_logging(level: str = "INFO") -> None:
+
+def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> None:
+    parsed = getattr(logging, level.upper(), logging.INFO)
     logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
+        level=parsed,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
+    # basicConfig is a no-op when the root logger already has handlers
+    # (e.g. under pytest), so set the level explicitly either way.
+    logging.getLogger().setLevel(parsed)
+    if log_file is None:
+        return
+    path = Path(log_file)
+    key = str(path.resolve())
+    if key in _FILE_HANDLERS:
+        return
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handler = TimedRotatingFileHandler(str(path), when="midnight", backupCount=7, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+    logging.getLogger().addHandler(handler)
+    _FILE_HANDLERS.add(key)
 
 
 def atomic_move(src: str | Path, dst: str | Path) -> Path:

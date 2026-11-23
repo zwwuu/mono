@@ -4,16 +4,14 @@ The watcher config file is validated once, at startup, before
 any scan starts. ``parse_config`` returns a frozen
 ``WatcherConfig``; anything wrong raises ``ConfigError`` listing
 EVERY problem found (missing keys, wrong types, unknown keys,
-unknown procedures, bad output patterns, out-of-range values)
-instead of failing on the first one -- and instead of failing
-when a job's first manifest arrives, after the run was already
-claimed, with a bare KeyError. ``load_config`` reads a file,
-imports the optional ``procedures_module`` (so custom procedure
-names validate too), and parses it; ``--check-config`` runs just
-this step and exits.
+bad transport kinds, out-of-range values) instead of failing on
+the first one -- and instead of failing when a job's first
+manifest arrives, after the run was already claimed, with a bare
+KeyError. ``load_config`` reads a file and parses it;
+``--check-config`` runs just this step and exits.
 
 The parser checks shape only. It does not check that the FTP
-root, the share root or the ledger path exist -- those are the
+hosts, the share root or the ledger path exist -- those are the
 deployment machine's concern -- and it does not connect to
 anything. A manifest for a job that is not in ``jobs`` at all is
 NOT a config error: the watcher dead-letters it as an unknown job
@@ -29,10 +27,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from datetime import datetime
 from pathlib import Path
-
-from ..domain.procedures import get_procedure
 
 
 class ConfigError(ValueError):
@@ -43,25 +38,57 @@ class ConfigError(ValueError):
 
 
 @dataclass(frozen=True)
-class JobConfig:
-    """One job's routing: which procedure, where its outputs go,
-    and whether it also stages outbound batches. ``share_dir`` is
-    resolved at parse time (default: the job name).
+class TransportConfig:
+    """One transport, wherever it appears: FTP 1 (``intake``) or
+    FTP 2 (``processing``). ``kind`` selects the fields that
+    apply: ``local`` needs ``root``; ``ftp``/``sftp`` need ``host``
+    (and take ``port``/``username``/``password``/``key_file``)."""
 
-    The output filename render is the job's business logic:
-    ``variables`` are its arbitrary tokens and {date}/{time} use
-    its own formats -- a future job with different formats or its
-    own variables gets its own context, and the parser validates
-    ``output_pattern`` against exactly that context."""
+    kind: str = "local"
+    host: str = ""
+    port: int = 21
+    username: str = ""
+    password_env: str | None = None
+    password: str | None = None
+    key_file_env: str | None = None
+    key_file: str | None = None
+    root: str = ""
 
-    procedure: str
-    expect_csv: bool = False
-    output_pattern: str = "{name}"
-    share_dir: str = ""
-    outbound: bool = False
-    variables: dict[str, str] = field(default_factory=dict)
-    date_format: str = "%Y%m%d"
-    time_format: str = "%H%M%S"
+
+@dataclass(frozen=True)
+class IntakeConfig:
+    """FTP 1: where the agent's manifest batches land, and where
+    finished originals are archived (per job)."""
+
+    transport: TransportConfig = field(default_factory=TransportConfig)
+    incoming_dir: str = "incoming"
+    done_dir: str = "done"
+    failed_dir: str = "failed"
+
+
+@dataclass(frozen=True)
+class ProcessingConfig:
+    """FTP 2: where batches go for external processing, and where
+    the processor reports the outcome (per job)."""
+
+    transport: TransportConfig = field(default_factory=TransportConfig)
+    processing_dir: str = "processing"
+    success_dir: str = "success"
+    failed_dir: str = "failed"
+
+
+@dataclass(frozen=True)
+class NotifyConfig:
+    """Email on batch completion. The SMTP password comes from the
+    env var named in ``password_env`` (never a literal)."""
+
+    smtp_host: str = ""
+    smtp_port: int = 587
+    from_addr: str = ""
+    to: list[str] = field(default_factory=list)
+    username: str = ""
+    password_env: str | None = None
+    use_tls: bool = True
 
 
 @dataclass(frozen=True)
@@ -73,12 +100,14 @@ class OutboundConfig:
 
 @dataclass(frozen=True)
 class WatcherConfig:
-    ftp_root: str
-    share_root: str
-    ledger_db: str
-    jobs: dict[str, JobConfig] = field(default_factory=dict)
+    intake: IntakeConfig
+    processing: ProcessingConfig
+    jobs: list[str] = field(default_factory=list)
+    ledger_db: str = ""
+    share_root: str | None = None
+    log_file: str | None = None
+    notify: NotifyConfig | None = None
     outbound: OutboundConfig | None = None
-    procedures_module: str | None = None
 
 
 # -- parsing ------------------------------------------------------------
@@ -205,108 +234,123 @@ class _Parser:
             return default
         return v
 
-    def _variables(self, d: dict, key: str, where: str, builtins: set[str]) -> dict:
-        """The job's arbitrary template tokens: name -> string
-        value. Names must be identifiers (a template field) and
-        must not collide with a built-in token."""
-        v = d.get(key)
-        if v is None:
-            return {}
-        if not isinstance(v, dict):
-            self.fail(where, f"{key!r} must be an object of name -> value, got {type(v).__name__}")
-            return {}
-        out: dict[str, str] = {}
-        for name, value in v.items():
-            if not isinstance(name, str) or not name.isidentifier():
-                self.fail(where, f"variable names must be identifiers, got {name!r}")
-                continue
-            if name in builtins:
-                self.fail(where, f"variable {name!r} collides with built-in token {name!r}")
-                continue
-            if not isinstance(value, str):
-                self.fail(where, f"variable {name!r} must be a string, got {value!r}")
-                continue
-            out[name] = value
-        return out
 
-    def _output_pattern(
-        self,
-        pattern: str,
-        where: str,
-        job: str,
-        variables: dict,
-        date_format: str,
-        time_format: str,
-    ) -> None:
-        """Render against the job's own context: catches unknown
-        tokens, where 'unknown' means unknown to this job, and a
-        pattern that would publish outside one filename."""
-        now = datetime.now()
-        context = dict(variables)
-        context.update(
-            name="x",
-            run_id="0" * 16,
-            job=job,
-            date=now.strftime(date_format),
-            time=now.strftime(time_format),
-        )
-        try:
-            rendered = pattern.format_map(context)
-        except KeyError as e:
-            self.fail(
-                where,
-                f"'output_pattern' {pattern!r} uses unknown token {e}; "
-                f"known tokens: {sorted(context)}",
-            )
-            return
-        if "/" in rendered or "\\" in rendered:
-            self.fail(
-                where,
-                f"'output_pattern' {pattern!r} must produce one filename, got {rendered!r}",
-            )
-
-
-_JOB_KEYS = {
-    "procedure",
-    "expect_csv",
-    "output_pattern",
-    "share_dir",
-    "outbound",
-    "variables",
-    "date_format",
-    "time_format",
+_TRANSPORT_KEYS = {
+    "transport",
+    "host",
+    "port",
+    "username",
+    "password_env",
+    "password",
+    "key_file_env",
+    "key_file",
+    "root",
 }
-# Every token the framework itself provides in an output pattern.
-_JOB_BUILTINS = {"name", "run_id", "job", "date", "time"}
-_TOP_KEYS = {"ftp_root", "share_root", "ledger_db", "jobs", "outbound", "procedures_module"}
+_TOP_KEYS = {
+    "intake",
+    "processing",
+    "jobs",
+    "share_root",
+    "ledger_db",
+    "log_file",
+    "notify",
+    "outbound",
+}
+_NOTIFY_KEYS = {"smtp_host", "smtp_port", "from", "to", "username", "password_env", "use_tls"}
 
 
-def _parse_job(p: _Parser, data: object, where: str, job: str) -> JobConfig:
+def _parse_transport(p: _Parser, data: object, where: str) -> TransportConfig:
     if not isinstance(data, dict):
         p.fail(where, "must be an object")
-        return JobConfig(procedure="")
-    p._unknown(data, _JOB_KEYS, where)
-    procedure = p._str(data, "procedure", where)
-    if procedure:
-        try:
-            get_procedure(procedure)
-        except ValueError as e:
-            p.fail(where, str(e))
-    pattern = p._opt_str(data, "output_pattern", where, default="{name}")
-    variables = p._variables(data, "variables", where, _JOB_BUILTINS)
-    date_format = p._opt_str(data, "date_format", where, default="%Y%m%d")
-    time_format = p._opt_str(data, "time_format", where, default="%H%M%S")
-    p._output_pattern(pattern, where, job, variables, date_format, time_format)
-    share_dir = p._rel_path(data, "share_dir", where, default=job)
-    return JobConfig(
-        procedure=procedure,
-        expect_csv=p._bool(data, "expect_csv", where, False),
-        output_pattern=pattern,
-        share_dir=share_dir,
-        outbound=p._bool(data, "outbound", where, False),
-        variables=variables,
-        date_format=date_format,
-        time_format=time_format,
+        return TransportConfig()
+    kind = p._opt_str(data, "transport", where, default="local")
+    if kind not in ("local", "ftp", "sftp"):
+        p.fail(where, f"'transport' must be local|ftp|sftp, got {kind!r}")
+        kind = "local"
+    host = p._opt_str(data, "host", where, default="")
+    if kind in ("ftp", "sftp") and not host and "host" not in data:
+        p.fail(where, f"'host' is required for transport {kind!r}")
+    root = p._opt_str(data, "root", where, default="")
+    if kind == "local" and not root and "root" not in data:
+        p.fail(where, "'root' is required for transport 'local'")
+    default_port = 22 if kind == "sftp" else 21
+    return TransportConfig(
+        kind=kind,
+        host=host,
+        port=p._int(data, "port", where, default_port, minimum=1, maximum=65535),
+        username=p._opt_str(data, "username", where, default="") or "",
+        password_env=p._opt_str(data, "password_env", where),
+        password=p._opt_str(data, "password", where, allow_empty=True),
+        key_file_env=p._opt_str(data, "key_file_env", where),
+        key_file=p._opt_str(data, "key_file", where, allow_empty=True),
+        root=root,
+    )
+
+
+def _parse_intake(p: _Parser, data: object, where: str) -> IntakeConfig:
+    if not isinstance(data, dict):
+        p.fail(where, "must be an object")
+        return IntakeConfig()
+    p._unknown(data, _TRANSPORT_KEYS | {"incoming_dir", "done_dir", "failed_dir"}, where)
+    return IntakeConfig(
+        transport=_parse_transport(p, data, where),
+        incoming_dir=p._rel_path(data, "incoming_dir", where, default="incoming"),
+        done_dir=p._rel_path(data, "done_dir", where, default="done"),
+        failed_dir=p._rel_path(data, "failed_dir", where, default="failed"),
+    )
+
+
+def _parse_processing(p: _Parser, data: object, where: str) -> ProcessingConfig:
+    if not isinstance(data, dict):
+        p.fail(where, "must be an object")
+        return ProcessingConfig()
+    p._unknown(
+        data,
+        _TRANSPORT_KEYS | {"processing_dir", "success_dir", "failed_dir"},
+        where,
+    )
+    return ProcessingConfig(
+        transport=_parse_transport(p, data, where),
+        processing_dir=p._rel_path(data, "processing_dir", where, default="processing"),
+        success_dir=p._rel_path(data, "success_dir", where, default="success"),
+        failed_dir=p._rel_path(data, "failed_dir", where, default="failed"),
+    )
+
+
+def _parse_notify(p: _Parser, data: object, where: str) -> NotifyConfig:
+    if not isinstance(data, dict):
+        p.fail(where, "must be an object")
+        return NotifyConfig()
+    p._unknown(data, _NOTIFY_KEYS, where)
+    smtp_host = p._str(data, "smtp_host", where)
+    from_addr = p._str(data, "from", where)
+    to_raw = data.get("to")
+    to: list[str] = []
+    if to_raw is None:
+        p.fail(where, "missing required key 'to'")
+    elif isinstance(to_raw, str):
+        if not to_raw:
+            p.fail(where, "'to' must be a non-empty string")
+        else:
+            to = [to_raw]
+    elif isinstance(to_raw, list):
+        for addr in to_raw:
+            if not isinstance(addr, str) or not addr:
+                p.fail(where, f"'to' entries must be non-empty strings, got {addr!r}")
+                continue
+            to.append(addr)
+        if not to:
+            p.fail(where, "'to' must not be empty")
+    else:
+        p.fail(where, f"'to' must be a string or a list of strings, got {to_raw!r}")
+    return NotifyConfig(
+        smtp_host=smtp_host,
+        smtp_port=p._int(data, "smtp_port", where, 587, minimum=1, maximum=65535),
+        from_addr=from_addr,
+        to=to,
+        username=p._opt_str(data, "username", where, default="") or "",
+        password_env=p._opt_str(data, "password_env", where),
+        use_tls=p._bool(data, "use_tls", where, True),
     )
 
 
@@ -324,30 +368,47 @@ def _parse_outbound(p: _Parser, data: object, where: str) -> OutboundConfig:
 
 def _parse_watcher(p: _Parser, data: dict) -> WatcherConfig:
     p._unknown(data, _TOP_KEYS, "config")
-    ftp_root = p._str(data, "ftp_root", "config")
-    share_root = p._str(data, "share_root", "config")
     ledger_db = p._str(data, "ledger_db", "config")
-    jobs: dict[str, JobConfig] = {}
-    jobs_data = data.get("jobs")
-    if not isinstance(jobs_data, dict) or not jobs_data:
-        p.fail("config", "'jobs' must be a non-empty object")
+    intake = IntakeConfig()
+    if "intake" not in data:
+        p.fail("config", "missing required key 'intake'")
     else:
-        for job, job_data in jobs_data.items():
+        intake = _parse_intake(p, data["intake"], "intake")
+    processing = ProcessingConfig()
+    if "processing" not in data:
+        p.fail("config", "missing required key 'processing'")
+    else:
+        processing = _parse_processing(p, data["processing"], "processing")
+    jobs: list[str] = []
+    jobs_data = data.get("jobs")
+    if not isinstance(jobs_data, list) or not jobs_data:
+        p.fail("config", "'jobs' must be a non-empty list")
+    else:
+        for job in jobs_data:
             if not isinstance(job, str) or not job or "/" in job or "\\" in job:
                 p.fail("config", f"job names must be plain names, got {job!r}")
                 continue
-            jobs[job] = _parse_job(p, job_data, f"jobs.{job}", job)
+            if job not in jobs:
+                jobs.append(job)
+    share_root = p._opt_str(data, "share_root", "config")
+    log_file = p._opt_str(data, "log_file", "config")
+    notify = None
+    if data.get("notify") is not None:
+        notify = _parse_notify(p, data["notify"], "notify")
     outbound = None
     if data.get("outbound") is not None:
         outbound = _parse_outbound(p, data["outbound"], "outbound")
-    procedures_module = p._opt_str(data, "procedures_module", "config")
+    if outbound is not None and not share_root:
+        p.fail("config", "'share_root' is required when 'outbound' is set")
     return WatcherConfig(
-        ftp_root=ftp_root,
-        share_root=share_root,
-        ledger_db=ledger_db,
+        intake=intake,
+        processing=processing,
         jobs=jobs,
+        ledger_db=ledger_db,
+        share_root=share_root,
+        log_file=log_file,
+        notify=notify,
         outbound=outbound,
-        procedures_module=procedures_module,
     )
 
 
@@ -355,8 +416,6 @@ def parse_config(data: object) -> WatcherConfig:
     """Parse a raw (JSON-decoded) config dict into a typed WatcherConfig.
 
     Raises ConfigError listing every problem, before any scan starts.
-    The procedure registry must already hold the custom procedures
-    (``load_config`` imports ``procedures_module`` first).
     """
     if not isinstance(data, dict):
         raise ConfigError(f"config must be an object, got {type(data).__name__}")
@@ -367,9 +426,8 @@ def parse_config(data: object) -> WatcherConfig:
 
 
 def load_config(path: str | Path) -> WatcherConfig:
-    """Read a config file (JSON), import its optional procedures
-    module, and parse it. A malformed file, a missing procedures
-    module, or an invalid config raises with the reason."""
+    """Read a config file (JSON) and parse it. A malformed file or an
+    invalid config raises with the reason."""
     path = Path(path)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -377,10 +435,4 @@ def load_config(path: str | Path) -> WatcherConfig:
         raise ConfigError(f"config file {path} is not valid JSON: {e}") from e
     if not isinstance(raw, dict):
         raise ConfigError(f"config must be an object, got {type(raw).__name__}")
-    # Optional local procedures file: extra business procedures that
-    # live next to the config, imported without touching this watcher.
-    # Imported BEFORE parsing, so a custom procedure name validates.
-    extra = raw.get("procedures_module")
-    if extra:
-        __import__(extra)
     return parse_config(raw)

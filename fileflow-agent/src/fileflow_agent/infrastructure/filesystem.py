@@ -12,6 +12,7 @@ import csv
 import logging
 import os
 import shutil
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from fileflow_contract import sha256_file
@@ -21,11 +22,32 @@ PART_SUFFIX = ".part"
 log = logging.getLogger("fileflow_agent")
 
 
-def setup_logging(level: str = "INFO") -> None:
-    logging.basicConfig(
-        level=getattr(logging, level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s %(message)s",
-    )
+def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> None:
+    """Console logging, plus a rotating file log when ``log_file``
+    is set (midnight rotation, 7 backups). The file sees the same
+    records as the console. ``basicConfig`` is a no-op once a
+    handler exists (e.g. under pytest), so the agent logger's own
+    level is set here too -- otherwise INFO would never reach the
+    file handler. Calling this twice with the same file adds only
+    one file handler."""
+    lvl = getattr(logging, level.upper(), logging.INFO)
+    fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
+    logging.basicConfig(level=lvl, format=fmt)
+    log.setLevel(lvl)
+    if log_file is None:
+        return
+    path = Path(log_file)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    root = logging.getLogger()
+    for handler in root.handlers:
+        if isinstance(handler, TimedRotatingFileHandler) and (
+            Path(handler.baseFilename).resolve() == path.resolve()
+        ):
+            return
+    file_handler = TimedRotatingFileHandler(path, when="midnight", backupCount=7)
+    file_handler.setFormatter(logging.Formatter(fmt))
+    file_handler.setLevel(lvl)
+    root.addHandler(file_handler)
 
 
 def atomic_move(src: str | Path, dst: str | Path) -> Path:

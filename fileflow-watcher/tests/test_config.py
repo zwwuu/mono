@@ -20,42 +20,33 @@ EXAMPLE = Path(__file__).resolve().parents[1] / "config" / "watcher.example.json
 
 def _base(**overrides):
     cfg = {
-        "ftp_root": "/srv/ftp",
+        "intake": {"transport": "local", "root": "/srv/ftp1"},
+        "processing": {"transport": "ftp", "host": "ftp2.example.com", "username": "watcher"},
+        "jobs": ["daily-report"],
         "share_root": "/mnt/share",
         "ledger_db": "/tmp/watcher.db",
-        "jobs": {
-            "daily-report": {
-                "procedure": "normalize-csv",
-                "expect_csv": True,
-                "share_dir": "reports/daily",
-                "outbound": True,
-            }
-        },
-        "outbound": {
-            "requests_dir": "upload-requests",
-            "archive_dir": "upload-archive",
-            "min_age_seconds": 2,
-        },
     }
     cfg.update(overrides)
     return cfg
 
 
 def test_valid_config_parses_with_defaults():
-    cfg = parse_config(
-        _base(
-            jobs={"invoices": {"procedure": "uppercase-headers-csv"}},
-            outbound=None,
-        )
-    )
-    job = cfg.jobs["invoices"]
-    assert job.procedure == "uppercase-headers-csv"
-    assert job.expect_csv is False
-    assert job.output_pattern == "{name}"
-    assert job.share_dir == "invoices"  # default: the job name
-    assert job.outbound is False
+    cfg = parse_config(_base(outbound=None))
+    assert cfg.intake.transport.kind == "local"
+    assert cfg.intake.transport.root == "/srv/ftp1"
+    assert cfg.intake.incoming_dir == "incoming"
+    assert cfg.intake.done_dir == "done"
+    assert cfg.intake.failed_dir == "failed"
+    assert cfg.processing.transport.kind == "ftp"
+    assert cfg.processing.transport.host == "ftp2.example.com"
+    assert cfg.processing.transport.port == 21
+    assert cfg.processing.processing_dir == "processing"
+    assert cfg.processing.success_dir == "success"
+    assert cfg.processing.failed_dir == "failed"
+    assert cfg.jobs == ["daily-report"]
     assert cfg.outbound is None
-    assert cfg.procedures_module is None
+    assert cfg.notify is None
+    assert cfg.log_file is None
 
 
 def test_outbound_defaults():
@@ -65,27 +56,76 @@ def test_outbound_defaults():
     assert cfg.outbound.min_age_seconds == 2
 
 
+def test_notify_defaults():
+    cfg = parse_config(
+        _base(
+            notify={
+                "smtp_host": "smtp.example.com",
+                "from": "watcher@example.com",
+                "to": "ops@example.com",
+            }
+        )
+    )
+    assert cfg.notify.smtp_port == 587
+    assert cfg.notify.use_tls is True
+    assert cfg.notify.to == ["ops@example.com"]
+    assert cfg.notify.username == ""
+    assert cfg.notify.password_env is None
+
+
+def test_notify_to_list():
+    cfg = parse_config(
+        _base(
+            notify={
+                "smtp_host": "smtp.example.com",
+                "from": "watcher@example.com",
+                "to": ["a@example.com", "b@example.com"],
+            }
+        )
+    )
+    assert cfg.notify.to == ["a@example.com", "b@example.com"]
+
+
+def test_log_file_parses():
+    cfg = parse_config(_base(log_file="/var/log/fileflow-watcher/watcher.log"))
+    assert cfg.log_file == "/var/log/fileflow-watcher/watcher.log"
+
+
 def test_example_config_parses():
     cfg = parse_config(json.loads(EXAMPLE.read_text(encoding="utf-8")))
-    assert sorted(cfg.jobs) == ["daily-report", "invoices"]
-    assert cfg.jobs["daily-report"].procedure == "normalize-csv"
-    assert cfg.jobs["invoices"].output_pattern == "PROC-{name}"
+    assert cfg.jobs == ["monthly-report"]
+    assert cfg.intake.transport.kind == "local"
+    assert cfg.processing.transport.kind == "ftp"
+    assert cfg.processing.transport.host == "ftp2.example.com"
+    assert cfg.notify is not None
+    assert cfg.notify.to == ["ops@example.com"]
     assert cfg.outbound is not None
+    assert cfg.log_file == "/var/log/fileflow-watcher/watcher.log"
 
 
 def test_missing_required_keys_all_reported():
     with pytest.raises(ConfigError) as exc:
         parse_config({})
     msg = str(exc.value)
-    for key in ("'ftp_root'", "'share_root'", "'ledger_db'"):
+    for key in ("'intake'", "'processing'", "'ledger_db'"):
         assert key in msg
-    assert "'jobs' must be a non-empty object" in msg
+    assert "'jobs' must be a non-empty list" in msg
     assert "4 problems" in msg
 
 
+def test_old_source_key_rejected():
+    with pytest.raises(ConfigError, match="unknown key 'source'"):
+        parse_config(_base(source={"transport": "local", "root": "/srv/ftp1"}))
+
+
 def test_empty_jobs_rejected():
-    with pytest.raises(ConfigError, match="'jobs' must be a non-empty object"):
-        parse_config(_base(jobs={}))
+    with pytest.raises(ConfigError, match="'jobs' must be a non-empty list"):
+        parse_config(_base(jobs=[]))
+
+
+def test_jobs_must_be_a_list():
+    with pytest.raises(ConfigError, match="'jobs' must be a non-empty list"):
+        parse_config(_base(jobs="daily-report"))
 
 
 def test_unknown_top_level_key():
@@ -93,64 +133,113 @@ def test_unknown_top_level_key():
         parse_config(_base(typo=1))
 
 
-def test_unknown_job_key():
+def test_unknown_intake_key():
     cfg = _base()
-    cfg["jobs"]["daily-report"]["typo"] = 1
+    cfg["intake"]["typo"] = 1
     with pytest.raises(ConfigError, match="unknown key 'typo'"):
         parse_config(cfg)
 
 
-def test_unknown_procedure():
+def test_unknown_processing_key():
     cfg = _base()
-    cfg["jobs"]["daily-report"]["procedure"] = "nope"
-    with pytest.raises(ConfigError, match="unknown procedure 'nope'"):
+    cfg["processing"]["typo"] = 1
+    with pytest.raises(ConfigError, match="unknown key 'typo'"):
         parse_config(cfg)
 
 
-def test_missing_procedure():
-    cfg = _base()
-    del cfg["jobs"]["daily-report"]["procedure"]
-    with pytest.raises(ConfigError, match="missing required key 'procedure'"):
+def test_unknown_notify_key():
+    cfg = _base(notify={"smtp_host": "h", "from": "a@b", "to": "c@d", "typo": 1})
+    with pytest.raises(ConfigError, match="unknown key 'typo'"):
         parse_config(cfg)
 
 
-def test_output_pattern_unknown_token():
+def test_bad_transport_kind():
     cfg = _base()
-    cfg["jobs"]["daily-report"]["output_pattern"] = "{name}-{checksum}{ext}"
-    with pytest.raises(ConfigError, match="unknown token 'checksum'"):
+    cfg["intake"]["transport"] = "smoke"
+    with pytest.raises(ConfigError, match="'transport' must be local\\|ftp\\|sftp"):
         parse_config(cfg)
 
 
-def test_output_pattern_must_be_one_filename():
+def test_local_transport_needs_root():
+    with pytest.raises(ConfigError, match="'root' is required for transport 'local'"):
+        parse_config(_base(intake={"transport": "local"}))
+
+
+def test_ftp_transport_needs_host():
+    with pytest.raises(ConfigError, match="'host' is required for transport 'ftp'"):
+        parse_config(_base(processing={"transport": "ftp"}))
+
+
+def test_sftp_port_default():
+    cfg = parse_config(_base(processing={"transport": "sftp", "host": "sftp.example.com"}))
+    assert cfg.processing.transport.port == 22
+
+
+@pytest.mark.parametrize(
+    "port, problem", [(0, "'port' must be >= 1"), (70000, "'port' must be <= 65535")]
+)
+def test_bad_port(port, problem):
     cfg = _base()
-    cfg["jobs"]["daily-report"]["output_pattern"] = "{name}/x.csv"
-    with pytest.raises(ConfigError, match="must produce one filename"):
+    cfg["processing"]["port"] = port
+    with pytest.raises(ConfigError, match=problem):
         parse_config(cfg)
 
 
-@pytest.mark.parametrize("share_dir", ["../escape", "/abs/path"])
-def test_share_dir_must_stay_under_share_root(share_dir):
+@pytest.mark.parametrize("key, value", [("incoming_dir", "../escape"), ("done_dir", "/abs/path")])
+def test_intake_dir_must_stay_under_root(key, value):
     cfg = _base()
-    cfg["jobs"]["daily-report"]["share_dir"] = share_dir
+    cfg["intake"][key] = value
+    with pytest.raises(ConfigError, match="must stay under its root"):
+        parse_config(cfg)
+
+
+def test_processing_dir_must_stay_under_root():
+    cfg = _base()
+    cfg["processing"]["success_dir"] = "../escape"
     with pytest.raises(ConfigError, match="must stay under its root"):
         parse_config(cfg)
 
 
 def test_job_name_must_be_plain():
-    cfg = _base(jobs={"bad/name": {"procedure": "normalize-csv"}})
     with pytest.raises(ConfigError, match="job names must be plain names"):
+        parse_config(_base(jobs=["bad/name"]))
+
+
+def test_notify_missing_fields():
+    with pytest.raises(ConfigError) as exc:
+        parse_config(_base(notify={}))
+    msg = str(exc.value)
+    assert "missing required key 'smtp_host'" in msg
+    assert "missing required key 'from'" in msg
+    assert "missing required key 'to'" in msg
+    assert "3 problems" in msg
+
+
+def test_notify_bad_port():
+    cfg = _base(notify={"smtp_host": "h", "from": "a@b", "to": "c@d", "smtp_port": 0})
+    with pytest.raises(ConfigError, match="'smtp_port' must be >= 1"):
         parse_config(cfg)
+
+
+def test_share_root_required_with_outbound():
+    cfg = _base(outbound={})
+    del cfg["share_root"]
+    with pytest.raises(ConfigError, match="'share_root' is required when 'outbound' is set"):
+        parse_config(cfg)
+
+
+def test_share_root_not_required_without_outbound():
+    cfg = _base(outbound=None)
+    del cfg["share_root"]
+    assert parse_config(cfg).share_root is None
 
 
 @pytest.mark.parametrize(
     "override, field",
     [
-        (
-            {"jobs": {"daily-report": {"procedure": "normalize-csv", "expect_csv": "yes"}}},
-            "'expect_csv'",
-        ),
+        ({"jobs": "daily-report"}, "'jobs'"),
         ({"outbound": {"min_age_seconds": -1}}, "'min_age_seconds'"),
-        ({"jobs": []}, "'jobs'"),
+        ({"intake": {"transport": "local", "root": "/srv/ftp1", "port": "21"}}, "'port'"),
     ],
 )
 def test_wrong_types_and_values(override, field):
@@ -161,13 +250,13 @@ def test_wrong_types_and_values(override, field):
 def test_multiple_problems_reported_at_once():
     cfg = _base(outbound={"min_age_seconds": -1})
     del cfg["ledger_db"]
-    cfg["jobs"]["daily-report"]["procedure"] = "nope"
+    cfg["intake"]["transport"] = "smoke"
     with pytest.raises(ConfigError) as exc:
         parse_config(cfg)
     msg = str(exc.value)
     assert "3 problems" in msg
     assert "missing required key 'ledger_db'" in msg
-    assert "unknown procedure 'nope'" in msg
+    assert "'transport' must be local|ftp|sftp" in msg
     assert "'min_age_seconds' must be >= 0" in msg
 
 
@@ -181,50 +270,3 @@ def test_check_config_bad(tmp_path: Path):
     path = tmp_path / "watcher.json"
     path.write_text(json.dumps(_base(typo=1)), encoding="utf-8")
     assert main(["--config", str(path), "--check-config"]) == 2
-
-
-def _job_with(**job_overrides):
-    cfg = _base()
-    cfg["jobs"]["daily-report"].update(job_overrides)
-    return cfg
-
-
-def test_job_variables_are_the_output_tokens():
-    # The token set is the job's business logic: an output pattern
-    # using the job's own variable and its own date format parses.
-    cfg = parse_config(
-        _job_with(
-            variables={"client": "acme"},
-            date_format="%Y-%m-%d",
-            output_pattern="{date}_{client}_{name}",
-        )
-    )
-    job = cfg.jobs["daily-report"]
-    assert job.variables == {"client": "acme"}
-    assert job.date_format == "%Y-%m-%d"
-    assert job.output_pattern == "{date}_{client}_{name}"
-
-
-@pytest.mark.parametrize(
-    "variables, problem",
-    [
-        ({"name": "x"}, "collides with built-in token 'name'"),
-        ({"date": "x"}, "collides with built-in token 'date'"),
-        ({"my-var": "x"}, "variable names must be identifiers"),
-        ({"client": 3}, "variable 'client' must be a string"),
-    ],
-)
-def test_job_variables_rejected(variables, problem):
-    with pytest.raises(ConfigError, match=problem):
-        parse_config(_job_with(variables=variables))
-
-
-def test_job_date_format_must_not_be_empty():
-    with pytest.raises(ConfigError, match="'date_format' must be a non-empty string"):
-        parse_config(_job_with(date_format=""))
-
-
-def test_output_pattern_unknown_token_still_fails():
-    cfg = _job_with(variables={"client": "acme"}, output_pattern="{client}_{nope}_{name}")
-    with pytest.raises(ConfigError, match="unknown token 'nope'"):
-        parse_config(cfg)

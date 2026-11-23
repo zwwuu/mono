@@ -27,7 +27,7 @@ Action reference (each action is an object with an "action" field):
       download action produces one file in the batch)
 
 The source object may also carry "headless": false to watch the run,
-"chrome_binary": "/path/to/chrome" for a non-standard install, and
+"executable_path": "/path/to/chrome" for a non-standard install, and
 "timeout_seconds" (default 60) for page loads.
 
 Selectors work exactly as in the monorepo browser source: a plain CSS
@@ -384,7 +384,7 @@ class SeleniumSource:
         self.actions = validate_actions(list(cfg.actions))
         self.headless = cfg.headless
         self.timeout = cfg.timeout_seconds
-        self.chrome_binary = cfg.chrome_binary
+        self.executable_path = cfg.executable_path
         self._driver = driver
         self._owns_driver = driver is None
 
@@ -399,8 +399,8 @@ class SeleniumSource:
             options.add_argument("--headless=new")
         options.add_argument("--no-sandbox")
         options.add_argument("--disable-dev-shm-usage")
-        if self.chrome_binary:
-            options.binary_location = self.chrome_binary
+        if self.executable_path:
+            options.binary_location = self.executable_path
         options.add_experimental_option(
             "prefs",
             {

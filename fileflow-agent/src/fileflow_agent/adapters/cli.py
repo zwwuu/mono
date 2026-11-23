@@ -17,21 +17,24 @@ from pathlib import Path
 
 from ..application.download import DownloadAndUploadUseCase
 from ..application.pickup import PickupUseCase
+from ..domain.ports import Notifier
 from ..infrastructure.config import AgentConfig, ConfigError, load_config
 from ..infrastructure.filesystem import log, setup_logging
+from ..infrastructure.notify import SmtpNotifier
 from ..infrastructure.persistence import SqlAlchemyRunRepository
 from ..infrastructure.sources import build_source
 from ..infrastructure.transport import build_transport
 from ..infrastructure.website import WebsiteUploader
 
 
-def build_download_use_case(cfg: AgentConfig):
+def build_download_use_case(cfg: AgentConfig, *, notifier: Notifier | None = None):
     """Compose one forward run: (use case, transport, repository).
 
     The caller owns the transport and repository and must close them.
     The config was parsed at startup, so ``destination`` is present;
-    a config without ``source`` cannot run in download mode.
-    """
+    a config without ``source`` cannot run in download mode. A
+    notifier is built from the config's ``notify`` section unless
+    the caller passes one (tests inject a fake SMTP)."""
     if cfg.source is None:
         raise ValueError("config has no 'source' section; download mode needs one")
     transport = build_transport(cfg.destination.transport)
@@ -39,15 +42,16 @@ def build_download_use_case(cfg: AgentConfig):
     use_case = DownloadAndUploadUseCase(
         cfg,
         source=build_source(
-            cfg.source, cfg.job, cfg.kind, cfg.variables, cfg.date_format, cfg.time_format
+            cfg.source, cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
         ),
         transport=transport,
         repository=repository,
+        notifier=notifier if notifier is not None else SmtpNotifier(cfg.notify),
     )
     return use_case, transport, repository
 
 
-def build_pickup_use_case(cfg: AgentConfig):
+def build_pickup_use_case(cfg: AgentConfig, *, notifier: Notifier | None = None):
     """Compose one pickup run: (use case, transport, repository).
 
     The uploader is None when the config has no ``deliver`` section;
@@ -55,7 +59,13 @@ def build_pickup_use_case(cfg: AgentConfig):
     transport = build_transport(cfg.destination.transport)
     repository = SqlAlchemyRunRepository(Path(cfg.ledger_db))
     uploader = WebsiteUploader(cfg.deliver) if cfg.deliver is not None else None
-    use_case = PickupUseCase(cfg, transport=transport, repository=repository, uploader=uploader)
+    use_case = PickupUseCase(
+        cfg,
+        transport=transport,
+        repository=repository,
+        uploader=uploader,
+        notifier=notifier if notifier is not None else SmtpNotifier(cfg.notify),
+    )
     return use_case, transport, repository
 
 
@@ -89,7 +99,6 @@ def main(argv: list[str] | None = None) -> int:
         help="parse the config and exit: 0 when it is valid, 2 with the problems listed",
     )
     args = ap.parse_args(argv)
-    setup_logging(args.log_level)
     try:
         cfg = load_config(args.config)
     except ConfigError as e:
@@ -97,6 +106,9 @@ def main(argv: list[str] | None = None) -> int:
         # never retry once a minute and log the same error forever.
         print(f"config error: {e}", file=sys.stderr)
         return 2
+    # Logging is set up after the config loads, so the config's
+    # log_file (when set) takes effect from the first run.
+    setup_logging(args.log_level, log_file=cfg.log_file)
     if args.check_config:
         dest = cfg.destination.transport
         where = dest.root if dest.kind == "local" else f"{dest.host}:{dest.port}"

@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fileflow-watcher"
+version = "2.8.0"
+description = "FileFlow Watcher: hand verified manifest batches from FTP 1 to FTP 2 for external processing, archive + notify on completion; also stage share-drive files into outgoing/ for the agent to upload to the website."
+requires-python = ">=3.10"
+dependencies = ["fileflow-contract>=1.1", "sqlalchemy>=2.0", "alembic>=1.13"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+sftp = ["paramiko>=3.0"]
+
+[project.scripts]
+fileflow-watcher = "fileflow_watcher.adapters.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "RUF", "BLE", "S110"]

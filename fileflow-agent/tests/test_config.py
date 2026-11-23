@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from fileflow_agent.adapters.cli import main
 from fileflow_agent.infrastructure.config import (
     ConfigError,
+    load_config,
     parse_config,
     parse_source,
     parse_transport,
@@ -27,7 +28,7 @@ EXAMPLES = Path(__file__).resolve().parents[1] / "config"
 def _base(**overrides):
     cfg = {
         "job": "ftp-inbox",
-        "kind": "sales",
+        "category": "sales",
         "source": {"type": "local", "path": "/tmp/in.csv"},
         "staging_dir": "/tmp/staging",
         "ledger_db": "/tmp/agent.db",
@@ -40,7 +41,7 @@ def _base(**overrides):
 def test_valid_config_parses_with_defaults():
     cfg = parse_config(_base())
     assert cfg.job == "ftp-inbox"
-    assert cfg.kind == "sales"
+    assert cfg.category == "sales"
     assert cfg.procedure == "rename-only"
     assert cfg.expect_csv is False
     assert cfg.rename_pattern == "{date}_{name}{ext}"
@@ -52,8 +53,8 @@ def test_valid_config_parses_with_defaults():
 
 
 def test_per_type_defaults():
-    assert parse_source({"type": "local-dir", "dir": "/tmp"}) == parse_source(
-        {"type": "local-dir", "dir": "/tmp", "pattern": "*", "min_age_seconds": 2}
+    assert parse_source({"type": "local-dir", "directory": "/tmp"}) == parse_source(
+        {"type": "local-dir", "directory": "/tmp", "pattern": "*", "min_age_seconds": 2}
     )
     remote = parse_source(
         {"type": "remote-dir", "transport": "ftp", "host": "h", "remote_dir": "."}
@@ -63,6 +64,69 @@ def test_per_type_defaults():
     sftp = parse_transport({"transport": "sftp", "host": "h"})
     assert sftp.port == 22
     assert sftp.username == ""
+
+
+def test_playwright_source_parses():
+    source = parse_source(
+        {
+            "type": "playwright",
+            "actions": [
+                {"action": "goto", "url": "https://portal.example.com/login"},
+                {"action": "download", "selector": "a.download"},
+            ],
+            "executable_path": "/usr/bin/chromium",
+        }
+    )
+    assert source.type == "playwright"
+    assert source.headless is True
+    assert source.timeout_seconds == 60
+    assert source.executable_path == "/usr/bin/chromium"
+    assert len(source.actions) == 2
+
+
+def test_remote_files_optional_parses():
+    source = parse_source(
+        {
+            "type": "remote-files",
+            "transport": "local",
+            "root": "/tmp",
+            "files": [
+                {"directory": "inbox", "name": "req.csv"},
+                {"directory": "inbox", "name": "opt.csv", "optional": True},
+            ],
+        }
+    )
+    assert source.files[0].optional is False
+    assert source.files[1].optional is True
+
+
+def test_procedures_module_loads_custom_procedure(tmp_path: Path, monkeypatch):
+    monkeypatch.syspath_prepend(str(tmp_path))
+    (tmp_path / "my_procs.py").write_text(
+        "from pathlib import Path\n"
+        "from fileflow_agent.domain.procedures import register_procedure\n"
+        "\n"
+        "\n"
+        "def my_proc(input_path: Path, workdir: Path, ctx: dict) -> Path:\n"
+        "    return workdir / input_path.name\n"
+        "\n"
+        "\n"
+        "register_procedure('my-proc', '1.0', my_proc)\n",
+        encoding="utf-8",
+    )
+    cfg = _base(procedure="my-proc", procedures_module="my_procs")
+    path = tmp_path / "agent.json"
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    assert load_config(path).procedure == "my-proc"
+    assert main(["--config", str(path), "--check-config"]) == 0
+
+
+def test_procedures_module_missing_fails(tmp_path: Path):
+    cfg = _base(procedure="my-proc", procedures_module="no_such_module_xyz")
+    path = tmp_path / "agent.json"
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    with pytest.raises(ModuleNotFoundError):
+        load_config(path)
 
 
 def test_pickup_only_config_parses_without_source():
@@ -140,7 +204,26 @@ def test_unknown_template_token_fails():
         parse_config(cfg)
 
 
-def test_kind_token_without_kind_fails():
+def test_category_token_without_category_fails():
+    cfg = _base(
+        source={
+            "type": "remote-files",
+            "transport": "local",
+            "root": "/tmp",
+            "files": [{"directory": "inbox/{category}", "name": "Test3-{category}.csv"}],
+        }
+    )
+    del cfg["category"]
+    with pytest.raises(ConfigError, match="unknown token 'category'"):
+        parse_config(cfg)
+
+
+def test_old_kind_key_rejected():
+    with pytest.raises(ConfigError, match="unknown key 'kind'"):
+        parse_config(_base(kind="sales"))
+
+
+def test_old_kind_token_rejected():
     cfg = _base(
         source={
             "type": "remote-files",
@@ -149,9 +232,29 @@ def test_kind_token_without_kind_fails():
             "files": [{"directory": "inbox/{kind}", "name": "Test3-{kind}.csv"}],
         }
     )
-    del cfg["kind"]
     with pytest.raises(ConfigError, match="unknown token 'kind'"):
         parse_config(cfg)
+
+
+def test_old_local_dir_key_rejected():
+    with pytest.raises(ConfigError, match="unknown key 'dir'"):
+        parse_source({"type": "local-dir", "dir": "/tmp"})
+
+
+def test_old_chrome_binary_key_rejected():
+    with pytest.raises(ConfigError, match="unknown key 'chrome_binary'"):
+        parse_source(
+            {
+                "type": "selenium",
+                "actions": [{"action": "goto", "url": "https://example.com"}],
+                "chrome_binary": "/usr/bin/google-chrome",
+            }
+        )
+
+
+def test_old_deliver_field_key_rejected():
+    with pytest.raises(ConfigError, match="unknown key 'field'"):
+        parse_config(_base(deliver={"upload_url": "https://example.com/upload", "field": "file"}))
 
 
 def test_destination_directory_token_fails():
@@ -172,7 +275,7 @@ def test_unknown_procedure():
 
 def test_deliver_needs_upload_url():
     with pytest.raises(ConfigError, match="missing required key 'upload_url'"):
-        parse_config(_base(deliver={"field": "file"}))
+        parse_config(_base(deliver={"form_field": "file"}))
 
 
 def test_deliver_url_must_be_http():
@@ -186,7 +289,7 @@ def test_deliver_url_must_be_http():
         ({"job": 123}, "'job'"),
         ({"expect_csv": "yes"}, "'expect_csv'"),
         (
-            {"source": {"type": "local-dir", "dir": "/tmp", "min_age_seconds": -1}},
+            {"source": {"type": "local-dir", "directory": "/tmp", "min_age_seconds": -1}},
             "'min_age_seconds'",
         ),
         (
@@ -202,6 +305,27 @@ def test_deliver_url_must_be_http():
                 }
             },
             "'headless'",
+        ),
+        (
+            {
+                "source": {
+                    "type": "playwright",
+                    "actions": [{"action": "download", "selector": "a"}],
+                    "executable_path": 123,
+                }
+            },
+            "'executable_path'",
+        ),
+        (
+            {
+                "source": {
+                    "type": "remote-files",
+                    "transport": "local",
+                    "root": "/tmp",
+                    "files": [{"directory": "inbox", "name": "a.csv", "optional": "yes"}],
+                }
+            },
+            "'optional'",
         ),
     ],
 )
@@ -220,6 +344,81 @@ def test_multiple_problems_reported_at_once():
     assert "missing required key 'job'" in msg
     assert "unknown procedure 'nope'" in msg
     assert "'port' must be <= 65535" in msg
+
+
+def test_notify_parses_with_defaults():
+    cfg = parse_config(
+        _base(
+            notify={
+                "smtp_host": "smtp.example.com",
+                "from": "agent@example.com",
+                "to": "ops@example.com",
+                "password_env": "FILEFLOW_SMTP_PASSWORD",
+            }
+        )
+    )
+    assert cfg.notify is not None
+    assert cfg.notify.smtp_host == "smtp.example.com"
+    assert cfg.notify.smtp_port == 587
+    assert cfg.notify.from_addr == "agent@example.com"
+    assert cfg.notify.to == "ops@example.com"
+    assert cfg.notify.password_env == "FILEFLOW_SMTP_PASSWORD"
+
+
+def test_no_notify_section_is_none():
+    assert parse_config(_base()).notify is None
+
+
+def test_notify_missing_fields_reported():
+    with pytest.raises(ConfigError, match="missing required key 'to'"):
+        parse_config(_base(notify={"smtp_host": "smtp.example.com", "from": "a@b.c"}))
+
+
+def test_notify_bad_port():
+    with pytest.raises(ConfigError, match="'smtp_port' must be <= 65535"):
+        parse_config(
+            _base(
+                notify={
+                    "smtp_host": "smtp.example.com",
+                    "smtp_port": 70000,
+                    "from": "a@b.c",
+                    "to": "o@b.c",
+                }
+            )
+        )
+
+
+def test_notify_unknown_key():
+    with pytest.raises(ConfigError, match="unknown key 'server'"):
+        parse_config(
+            _base(
+                notify={
+                    "smtp_host": "smtp.example.com",
+                    "from": "a@b.c",
+                    "to": "o@b.c",
+                    "server": "smtp.example.com",
+                }
+            )
+        )
+
+
+def test_log_file_parses():
+    assert parse_config(_base(log_file="/var/log/agent.log")).log_file == "/var/log/agent.log"
+    assert parse_config(_base()).log_file is None
+
+
+def test_check_config_ok_with_notify_and_log_file(tmp_path: Path):
+    path = tmp_path / "agent.json"
+    cfg = _base(
+        notify={
+            "smtp_host": "smtp.example.com",
+            "from": "agent@example.com",
+            "to": "ops@example.com",
+        },
+        log_file=str(tmp_path / "agent.log"),
+    )
+    path.write_text(json.dumps(cfg), encoding="utf-8")
+    assert main(["--config", str(path), "--check-config"]) == 0
 
 
 def test_check_config_ok(tmp_path: Path):
@@ -263,7 +462,9 @@ def test_job_variables_are_the_template_tokens():
     )
     assert cfg.variables == {"client": "acme"}
     assert cfg.date_format == "%Y-%m-%d"
-    context = template_context(cfg.job, cfg.kind, cfg.variables, cfg.date_format, cfg.time_format)
+    context = template_context(
+        cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
+    )
     assert context["client"] == "acme"
     assert context["date"] == datetime.now().strftime("%Y-%m-%d")
     assert render_template("inbox/{client}", context) == "inbox/acme"

@@ -59,7 +59,7 @@ def render_name(
 
 def template_context(
     job: str,
-    kind: str | None = None,
+    category: str | None = None,
     variables: dict | None = None,
     date_format: str = "%Y%m%d",
     time_format: str = "%H%M%S",
@@ -67,7 +67,7 @@ def template_context(
     """Tokens for directory/name templates: the run date plus the
     job's own values. {year}/{month}/{day} are the date's
     zero-padded components; {date}/{time} use the job's own
-    formats; {kind} is there only when the job sets a kind; and
+    formats; {category} is there only when the job sets a category; and
     ``variables`` are the job's arbitrary tokens. The token set is
     the job's business logic -- a future app with different
     formats or its own variables gets its own context, and the
@@ -82,8 +82,8 @@ def template_context(
         time=now.strftime(time_format),
         job=job,
     )
-    if kind is not None:
-        context["kind"] = str(kind)
+    if category is not None:
+        context["category"] = str(category)
     return context
 
 

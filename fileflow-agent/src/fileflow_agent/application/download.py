@@ -39,6 +39,8 @@ SQLite file -- which is exactly what the test suite does.
 from __future__ import annotations
 
 import shutil
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 from fileflow_contract import (
@@ -55,10 +57,11 @@ from fileflow_contract import (
 )
 
 from ..domain.integrity import render_name, render_template, template_context
-from ..domain.ports import RunRepository, Source, Transport
+from ..domain.ports import Notifier, RunRepository, Source, Transport
 from ..domain.procedures import get_procedure
 from ..infrastructure.config import AgentConfig, source_reference
 from ..infrastructure.filesystem import log, read_csv_rows
+from ..infrastructure.retry import with_retries
 
 
 def validate_input(path: Path, expect_csv: bool) -> None:
@@ -79,27 +82,71 @@ class DownloadAndUploadUseCase:
         transport: Transport,
         repository: RunRepository,
         procedure_lookup=get_procedure,
+        notifier: Notifier | None = None,
+        sleep: Callable[[float], None] | None = None,
     ):
         self.cfg = cfg
         self.source = source
         self.transport = transport
         self.repository = repository
         self.procedure_lookup = procedure_lookup
+        self.notifier = notifier
+        self._sleep = sleep or time.sleep
+
+    def _notify(
+        self,
+        *,
+        run_id: str,
+        status: str,
+        files: list[str],
+        destination: str | None = None,
+        error: str | None = None,
+        summary: str | None = None,
+    ) -> None:
+        if self.notifier is not None:
+            self.notifier.notify(
+                job=self.cfg.job,
+                run_id=run_id,
+                status=status,
+                files=files,
+                destination=destination,
+                error=error,
+                summary=summary,
+            )
 
     def run(self) -> dict:
         cfg = self.cfg
         job = cfg.job
         run_id = new_run_id()
+        started = time.monotonic()
         staging = Path(cfg.staging_dir) / run_id
         staging.mkdir(parents=True, exist_ok=True)
         log.info("run %s job=%s starting", run_id, job)
         try:
             # 1-2. download, split off already-processed files, validate
             # only the fresh ones. A changed file has a new hash, so it
-            # is fresh even under the same name.
-            downloaded = self.source.download(staging, run_id)
+            # is fresh even under the same name. A transient download
+            # failure is retried (OSError only, never validation).
+            downloaded = with_retries(
+                lambda: self.source.download(staging, run_id), sleep=self._sleep
+            )
             if not downloaded:
-                raise ValueError("source produced no files")
+                # Nothing to transfer: an empty drop folder, or a
+                # remote-files list whose entries are all optional
+                # and none was ready. That is "nothing to do", not a
+                # failure -- the same SKIPPED the
+                # all-already-processed case returns. A source that
+                # cannot connect, or a required remote-files entry
+                # that is missing, still raises above.
+                shutil.rmtree(staging)
+                log.info("run %s: nothing to transfer, SKIPPED", run_id)
+                return {
+                    "run_id": run_id,
+                    "job": job,
+                    "outputs": [],
+                    "skipped": [],
+                    "status": "SKIPPED",
+                }
             fresh: list[tuple[Path, str]] = []
             skipped: list[str] = []
             for path in downloaded:
@@ -189,12 +236,19 @@ class DownloadAndUploadUseCase:
                 remote_dir = render_template(
                     dir_template,
                     template_context(
-                        cfg.job, cfg.kind, cfg.variables, cfg.date_format, cfg.time_format
+                        cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
                     ),
                 )
             else:
                 remote_dir = f"incoming/{job}"
-            self.transport.upload_many_with_manifest(outputs, manifest_path, remote_dir)
+            # A transient upload failure is retried (OSError only);
+            # a hash mismatch is a ValueError and fails immediately.
+            with_retries(
+                lambda: self.transport.upload_many_with_manifest(
+                    outputs, manifest_path, remote_dir
+                ),
+                sleep=self._sleep,
+            )
             self.repository.claim(
                 run_id=run_id,
                 job=job,
@@ -214,6 +268,19 @@ class DownloadAndUploadUseCase:
                 len(outputs),
                 remote_dir,
             )
+            total_bytes = sum(output.stat().st_size for output, _ in outputs)
+            summary = (
+                f"run {run_id} job={job} UPLOADED {len(outputs)} file(s), "
+                f"{total_bytes} bytes in {time.monotonic() - started:.1f}s -> {remote_dir}"
+            )
+            log.info(summary)
+            self._notify(
+                run_id=run_id,
+                status="UPLOADED",
+                files=[name for _, name in outputs],
+                destination=remote_dir,
+                summary=summary,
+            )
             shutil.rmtree(staging)
             return {
                 "run_id": run_id,
@@ -224,5 +291,6 @@ class DownloadAndUploadUseCase:
             }
         except Exception as e:
             # Keep the staging dir for inspection; never upload a bad file.
+            self._notify(run_id=run_id, status="FAILED", files=[], error=str(e))
             log.error("run %s FAILED: %s (staging kept at %s)", run_id, e, staging)
             raise

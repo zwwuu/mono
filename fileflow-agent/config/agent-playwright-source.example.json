@@ -1,0 +1,49 @@
+{
+    "destination": {
+        "host": "192.168.10.20",
+        "port": 22,
+        "transport": "sftp",
+        "username": "fileflow"
+    },
+    "expect_csv": true,
+    "job": "portal-report",
+    "ledger_db": "/var/lib/fileflow-agent/agent.db",
+    "procedure": "normalize-csv",
+    "rename_pattern": "{date}_{name}{ext}",
+    "source": {
+        "actions": [
+            {
+                "action": "goto",
+                "url": "https://portal.example.com/login"
+            },
+            {
+                "action": "fill",
+                "selector": "#username",
+                "value": "alice"
+            },
+            {
+                "action": "fill",
+                "secret_env": "PORTAL_PASSWORD",
+                "selector": "#password"
+            },
+            {
+                "action": "click",
+                "selector": "button[type=submit]"
+            },
+            {
+                "action": "wait_for",
+                "selector": "a.download",
+                "timeout_seconds": 30
+            },
+            {
+                "action": "download",
+                "selector": "a.download",
+                "timeout_seconds": 60
+            }
+        ],
+        "headless": true,
+        "timeout_seconds": 60,
+        "type": "playwright"
+    },
+    "staging_dir": "/var/lib/fileflow-agent/staging"
+}

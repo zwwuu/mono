@@ -1,0 +1,52 @@
+{
+    "destination": {
+        "directory": "reports/{year}{month}",
+        "host": "192.168.10.20",
+        "password_env": "FILEFLOW_FTP_PASSWORD",
+        "port": 21,
+        "transport": "ftp",
+        "username": "fileflow"
+    },
+    "job": "monthly-report",
+    "category": "pdf",
+    "ledger_db": "/var/lib/fileflow-agent/agent.db",
+    "procedure": "rename-pdf-report",
+    "procedures_module": "procedures_local",
+    "rename_pattern": "{name}{ext}",
+    "source": {
+        "actions": [
+            {
+                "action": "goto",
+                "url": "https://portal.example.com/login"
+            },
+            {
+                "action": "fill",
+                "selector": "#username",
+                "value": "reports@example.com"
+            },
+            {
+                "action": "fill",
+                "secret_env": "PORTAL_PASSWORD",
+                "selector": "#password"
+            },
+            {
+                "action": "click",
+                "selector": "button[type=submit]"
+            },
+            {
+                "action": "wait_for",
+                "selector": "a.download",
+                "timeout_seconds": 30
+            },
+            {
+                "action": "download",
+                "selector": "a.download",
+                "timeout_seconds": 60
+            }
+        ],
+        "headless": true,
+        "timeout_seconds": 60,
+        "type": "playwright"
+    },
+    "staging_dir": "/var/lib/fileflow-agent/staging"
+}

@@ -85,7 +85,7 @@ class DirectorySource:
     """
 
     def __init__(self, cfg: LocalDirSourceConfig):
-        self.dir = Path(cfg.dir)
+        self.directory = Path(cfg.directory)
         self.pattern = cfg.pattern
         self.min_age = cfg.min_age_seconds
 
@@ -93,7 +93,7 @@ class DirectorySource:
         dest_dir.mkdir(parents=True, exist_ok=True)
         now = time.time()
         staged: list[Path] = []
-        for src in sorted(self.dir.glob(self.pattern)):
+        for src in sorted(self.directory.glob(self.pattern)):
             if not src.is_file() or src.suffix == PART_SUFFIX:
                 continue
             if now - src.stat().st_mtime < self.min_age:
@@ -112,14 +112,14 @@ class DirectorySource:
 def build_source(
     source: SourceConfig,
     job: str,
-    kind: str | None = None,
+    category: str | None = None,
     variables: dict | None = None,
     date_format: str = "%Y%m%d",
     time_format: str = "%H%M%S",
 ) -> Source:
     """Build a source from a parsed ``source`` section. ``job``,
-    ``kind``, ``variables`` and the date/time formats are the
-    template context a source needs ({job}, {kind}, the job's own
+    ``category``, ``variables`` and the date/time formats are the
+    template context a source needs ({job}, {category}, the job's own
     tokens, {date}/{time} in the job's formats); sources that do
     not template anything ignore them. The config parser has
     already validated the section, so an unknown type cannot reach
@@ -133,7 +133,7 @@ def build_source(
     if source.type == "remote-dir":
         return RemoteDirectorySource(source)
     if source.type == "remote-files":
-        return RemoteFilesSource(source, job, kind, variables, date_format, time_format)
+        return RemoteFilesSource(source, job, category, variables, date_format, time_format)
     if source.type == "smb":
         from .smb_source import SmbSource
 
@@ -142,6 +142,10 @@ def build_source(
         from .selenium_source import SeleniumSource
 
         return SeleniumSource(source)
+    if source.type == "playwright":
+        from .playwright_source import PlaywrightSource
+
+        return PlaywrightSource(source)
     raise ValueError(f"unknown source type {source.type!r}")
 
 
@@ -208,11 +212,16 @@ class RemoteFilesSource:
 
     ``files`` is a list of {"directory", "name"} templates, rendered
     per run from the run date ({year} {month} {day}) and job-level
-    values ({job}, {kind} -- the job's kind). All of them
-    are one batch under one manifest. Every listed file is required:
-    a missing, empty, or still-being-written file fails the run
-    loud instead of uploading a partial batch -- a named file was
-    explicitly asked for, so its absence is an error, not "no files".
+    values ({job}, {category} -- the job's category). All of them
+    are one batch under one manifest. Every listed file is required
+    by default: a missing, empty, or still-being-written file fails
+    the run loud instead of uploading a partial batch -- a named
+    file was explicitly asked for, so its absence is an error, not
+    "no files". An entry with ``"optional": true`` is the exception:
+    when it is missing, empty, or still being written it is logged
+    and skipped, and the batch ships without it. If every entry is
+    optional and none is ready, the source returns no files and the
+    run is SKIPPED (no manifest, no upload).
 
     Connection comes from the source config; the password resolves
     the same way as the upload transport (env var first, literal
@@ -225,7 +234,7 @@ class RemoteFilesSource:
         self,
         cfg: RemoteFilesSourceConfig,
         job: str,
-        kind: str | None = None,
+        category: str | None = None,
         variables: dict | None = None,
         date_format: str = "%Y%m%d",
         time_format: str = "%H%M%S",
@@ -233,7 +242,7 @@ class RemoteFilesSource:
     ):
         self.cfg = cfg
         self.job = job
-        self.kind = kind
+        self.category = category
         self.variables = variables or {}
         self.date_format = date_format
         self.time_format = time_format
@@ -254,7 +263,7 @@ class RemoteFilesSource:
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
         context = template_context(
-            self.job, self.kind, self.variables, self.date_format, self.time_format
+            self.job, self.category, self.variables, self.date_format, self.time_format
         )
         transport = self._open_transport()
         try:
@@ -267,11 +276,22 @@ class RemoteFilesSource:
                 where = f"{remote_dir}/{name}"
                 size = transport.remote_size(remote_dir, name)
                 if size is None:
+                    if entry.optional:
+                        log.info("remote-files: optional file not present, skipped: %s", where)
+                        continue
                     raise ValueError(f"remote-files: file not found: {where}")
                 if size == 0:
+                    if entry.optional:
+                        log.info("remote-files: optional file is empty, skipped: %s", where)
+                        continue
                     raise ValueError(f"remote-files: file is empty: {where}")
                 mtime = transport.remote_mtime(remote_dir, name)
                 if mtime is not None and time.time() - mtime < self.min_age:
+                    if entry.optional:
+                        log.info(
+                            "remote-files: optional file still being written, skipped: %s", where
+                        )
+                        continue
                     raise ValueError(f"remote-files: file still being written: {where}")
                 transport.download(remote_dir, name, dest_dir / name)
                 staged.append(dest_dir / name)
