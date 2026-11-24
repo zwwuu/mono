@@ -262,6 +262,39 @@ def test_destination_directory_token_fails():
         parse_config(cfg)
 
 
+def test_local_path_templates_validate():
+    # staging_dir, ledger_db and log_file are templates too: they
+    # render against the job context at use time, per run, so an
+    # unknown token fails at startup -- and a job token parses.
+    cfg = parse_config(
+        _base(
+            staging_dir="/tmp/staging/{job}/{date}",
+            ledger_db="/tmp/{job}.db",
+            log_file="/tmp/{job}.log",
+        )
+    )
+    assert cfg.staging_dir == "/tmp/staging/{job}/{date}"
+    assert cfg.ledger_db == "/tmp/{job}.db"
+    assert cfg.log_file == "/tmp/{job}.log"
+    for field, value in (
+        ("staging_dir", "/tmp/staging/{nope}"),
+        ("ledger_db", "/tmp/{nope}.db"),
+        ("log_file", "/tmp/{nope}.log"),
+    ):
+        with pytest.raises(ConfigError, match="unknown token 'nope'"):
+            parse_config(_base(**{field: value}))
+
+
+def test_local_path_templates_have_no_per_file_tokens():
+    # {name}/{ext}/{run_id} exist only for the rename pattern:
+    # staging_dir renders with no file in hand, so they fail here
+    # rather than at the first run.
+    with pytest.raises(ConfigError, match="unknown token 'name'"):
+        parse_config(_base(staging_dir="/tmp/staging/{name}"))
+    with pytest.raises(ConfigError, match="unknown token 'run_id'"):
+        parse_config(_base(ledger_db="/tmp/{run_id}.db"))
+
+
 def test_rename_pattern_token_fails():
     with pytest.raises(ConfigError, match="'rename_pattern'"):
         parse_config(_base(rename_pattern="{date}_{checksum}{ext}"))

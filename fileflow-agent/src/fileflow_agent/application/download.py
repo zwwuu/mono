@@ -56,7 +56,7 @@ from fileflow_contract import (
     write_manifest,
 )
 
-from ..domain.integrity import render_name, render_template, template_context
+from ..domain.integrity import Context
 from ..domain.ports import Notifier, RunRepository, Source, Transport
 from ..domain.procedures import get_procedure
 from ..infrastructure.config import AgentConfig, source_reference
@@ -119,7 +119,10 @@ class DownloadAndUploadUseCase:
         job = cfg.job
         run_id = new_run_id()
         started = time.monotonic()
-        staging = Path(cfg.staging_dir) / run_id
+        # One Context per run: the date in every template is this
+        # run's date, not the process's startup date.
+        ctx = Context(job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
+        staging = Path(ctx.local_path(cfg.staging_dir)) / run_id
         staging.mkdir(parents=True, exist_ok=True)
         log.info("run %s job=%s starting", run_id, job)
         try:
@@ -189,15 +192,11 @@ class DownloadAndUploadUseCase:
                     formatted.name.rsplit(".", 1) if "." in formatted.name else (formatted.name, "")
                 )
                 ext = f".{ext}" if ext else ""
-                out_name = render_name(
+                out_name = ctx.render_name(
                     cfg.rename_pattern,
                     name=stem,
                     ext=ext,
-                    job=job,
                     run_id=run_id,
-                    variables=cfg.variables,
-                    date_format=cfg.date_format,
-                    time_format=cfg.time_format,
                 )
                 output = staging / out_name
                 if formatted != output:
@@ -233,12 +232,7 @@ class DownloadAndUploadUseCase:
             # incoming/<job>/ the watcher scans.
             dir_template = cfg.destination.directory
             if dir_template:
-                remote_dir = render_template(
-                    dir_template,
-                    template_context(
-                        cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
-                    ),
-                )
+                remote_dir = ctx.remote_path(dir_template)
             else:
                 remote_dir = f"incoming/{job}"
             # A transient upload failure is retried (OSError only);

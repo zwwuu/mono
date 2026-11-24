@@ -4,11 +4,9 @@ import os
 import posixpath
 import sys
 from dataclasses import dataclass, field
-from datetime import date
-from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
-TRANSPORTS = {"ftp", "sftp"}
+TRANSPORTS = {"local", "ftp", "sftp"}
 
 
 class ConfigError(Exception):
@@ -16,17 +14,12 @@ class ConfigError(Exception):
 
 
 class Context:
-    """App context: fills {placeholders} and anchors relative paths."""
+    """App context: fills {placeholders} and anchors relative local paths."""
 
-    def __init__(self, when: Optional[date] = None, base_dir: Optional[str] = None, **extra: str):
-        when = when or date.today()
-        self.values = {
-            "year": f"{when.year:04d}",
-            "month": f"{when.month:02d}",
-            "day": f"{when.day:02d}",
-        }
-        self.values.update(extra)  # e.g. category="sales"
-        # relative paths are resolved against the program's directory
+    def __init__(self, base_dir: Optional[str] = None, **values: str):
+        # placeholder values come only from the app, e.g. Context(year="2026", category="sales")
+        self.values = dict(values)
+        # relative local paths are resolved against the program's directory
         self.base_dir = os.path.abspath(base_dir or os.path.dirname(os.path.abspath(sys.argv[0])))
 
     def render(self, template: str) -> str:
@@ -36,13 +29,14 @@ class Context:
             raise ConfigError(f"Unknown placeholder {e} in {template!r}") from None
 
     def local_path(self, template: str) -> str:
-        """Fill placeholders, then return an absolute path on this machine."""
+        """Fill placeholders, then return an absolute, cleaned local path."""
         return os.path.normpath(os.path.join(self.base_dir, self.render(template)))
 
-    def remote_path(self, template: str) -> str:
-        """Fill placeholders, then return an absolute posix path (ftp/sftp)."""
-        base = Path(self.base_dir).as_posix()
-        return posixpath.normpath(posixpath.join(base, self.render(template)))
+    def path_for(self, transport: str, template: str) -> str:
+        """Local: resolve to absolute. ftp/sftp: fill placeholders only."""
+        if transport == "local":
+            return self.local_path(template)
+        return self.render(template)
 
 
 def _require(data: dict, key: str, where: str):
@@ -58,44 +52,53 @@ def _transport(data: dict, where: str) -> str:
     return transport
 
 
+def _connection(data: dict, transport: str, where: str) -> Tuple[Optional[str], Optional[int], Optional[str]]:
+    """host/port/username: required for ftp/sftp, ignored for local."""
+    if transport == "local":
+        return None, None, None
+    return (
+        _require(data, "host", where),
+        int(_require(data, "port", where)),
+        _require(data, "username", where),
+    )
+
+
 @dataclass
 class SourceFile:
-    directory: str  # absolute, remote
+    directory: str
     name: str
+    path: str  # directory + name
     optional: bool = False
 
-    @property
-    def path(self) -> str:
-        return posixpath.join(self.directory, self.name)
-
     @classmethod
-    def from_dict(cls, data: dict, ctx: Context, where: str) -> "SourceFile":
-        return cls(
-            directory=ctx.remote_path(_require(data, "directory", where)),
-            name=ctx.render(_require(data, "name", where)),
-            optional=bool(data.get("optional", False)),
-        )
+    def from_dict(cls, data: dict, transport: str, ctx: Context, where: str) -> "SourceFile":
+        directory = ctx.path_for(transport, _require(data, "directory", where))
+        name = ctx.render(_require(data, "name", where))
+        join = os.path.join if transport == "local" else posixpath.join
+        return cls(directory, name, join(directory, name), bool(data.get("optional", False)))
 
 
 @dataclass
 class Source:
     transport: str
-    host: str
-    port: int
-    username: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
     password_env: Optional[str] = None
     files: List[SourceFile] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict, ctx: Context, where: str = "source") -> "Source":
+        transport = _transport(data, where)
+        host, port, username = _connection(data, transport, where)
         return cls(
-            transport=_transport(data, where),
-            host=_require(data, "host", where),
-            port=int(_require(data, "port", where)),
-            username=_require(data, "username", where),
+            transport=transport,
+            host=host,
+            port=port,
+            username=username,
             password_env=data.get("password_env"),
             files=[
-                SourceFile.from_dict(f, ctx, f"{where}.files[{i}]")
+                SourceFile.from_dict(f, transport, ctx, f"{where}.files[{i}]")
                 for i, f in enumerate(_require(data, "files", where))
             ],
         )
@@ -113,19 +116,21 @@ class Source:
 @dataclass
 class Destination:
     transport: str
-    host: str
-    port: int
-    username: str
-    path: str  # absolute, remote
+    path: str
+    host: Optional[str] = None
+    port: Optional[int] = None
+    username: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict, ctx: Context, where: str = "destination") -> "Destination":
+        transport = _transport(data, where)
+        host, port, username = _connection(data, transport, where)
         return cls(
-            transport=_transport(data, where),
-            host=_require(data, "host", where),
-            port=int(_require(data, "port", where)),
-            username=_require(data, "username", where),
-            path=ctx.remote_path(_require(data, "path", where)),
+            transport=transport,
+            path=ctx.path_for(transport, _require(data, "path", where)),
+            host=host,
+            port=port,
+            username=username,
         )
 
 
@@ -161,13 +166,21 @@ class JobConfig:
 
 
 if __name__ == "__main__":
-    ctx = Context(category=sys.argv[2] if len(sys.argv) > 2 else "sales")
+    from datetime import date  # demo only
+
+    today = date.today()
+    ctx = Context(
+        year=f"{today.year:04d}",
+        month=f"{today.month:02d}",
+        day=f"{today.day:02d}",
+        category=sys.argv[2] if len(sys.argv) > 2 else "sales",
+    )
     cfg = JobConfig.load(sys.argv[1] if len(sys.argv) > 1 else "config.json", ctx)
     d, s = cfg.destination, cfg.source
     print(f"job: {cfg.job} ({cfg.category})")
     print(f"ledger_db: {cfg.ledger_db}")
     print(f"staging_dir: {cfg.staging_dir}")
-    print(f"destination: {d.transport}://{d.host}:{d.port}{d.path}")
-    print(f"source: {s.transport}://{s.host}:{s.port}")
+    print(f"destination: {d.transport} {d.host or ''} {d.path}")
+    print(f"source: {s.transport} {s.host or ''}")
     for f in s.files:
         print(f"  {'(optional) ' if f.optional else ''}{f.path}")

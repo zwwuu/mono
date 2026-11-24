@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 
 from .. import __version__
-from ..domain.integrity import render_template, template_context
+from ..domain.integrity import Context
 from ..domain.ports import Source
 from .config import (
     LocalDirSourceConfig,
@@ -262,15 +262,15 @@ class RemoteFilesSource:
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        context = template_context(
-            self.job, self.category, self.variables, self.date_format, self.time_format
-        )
+        # One Context per download: the date in every template is
+        # this run's date, not the process's startup date.
+        ctx = Context(self.job, self.category, self.variables, self.date_format, self.time_format)
         transport = self._open_transport()
         try:
             staged: list[Path] = []
             for entry in self.files:
-                remote_dir = render_template(entry.directory, context)
-                name = render_template(entry.name, context)
+                remote_dir = ctx.remote_path(entry.directory)
+                name = ctx.render(entry.name)
                 if "/" in name or "\\" in name:
                     raise ValueError(f"remote-files: name template produced a path: {name!r}")
                 where = f"{remote_dir}/{name}"

@@ -20,6 +20,7 @@ from pathlib import Path
 
 from fileflow_contract import Manifest, read_manifest, verify_files
 
+from ..domain.integrity import Context
 from ..domain.ports import Notifier, RunRepository, Transport, WebsiteUploader
 from ..infrastructure.config import AgentConfig
 from ..infrastructure.filesystem import log
@@ -73,6 +74,15 @@ class PickupUseCase:
             return {}
         job = self.cfg.job
         started = time.monotonic()
+        # One Context per pass: the date in staging_dir is this
+        # pass's date, not the process's startup date.
+        ctx = Context(
+            job,
+            self.cfg.category,
+            self.cfg.variables,
+            self.cfg.date_format,
+            self.cfg.time_format,
+        )
         counts: dict[str, int] = {}
         # One email per run, at the end: the outcomes of every batch
         # this pass handled. A pass that only cleared DUPLICATEs or
@@ -84,7 +94,7 @@ class PickupUseCase:
         for manifest_name in sorted(self.transport.list_names(remote_dir)):
             if not manifest_name.endswith(".manifest.json"):
                 continue
-            staging = Path(self.cfg.staging_dir) / "pickup"
+            staging = Path(ctx.local_path(self.cfg.staging_dir)) / "pickup"
             staging.mkdir(parents=True, exist_ok=True)
             local_manifest = staging / manifest_name
             try:

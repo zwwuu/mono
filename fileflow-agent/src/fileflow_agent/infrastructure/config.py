@@ -475,6 +475,17 @@ def parse_config(data: object) -> AgentConfig:
         raise ConfigError(f"config: 'rename_pattern' {cfg.rename_pattern!r} is invalid: {e}") from e
     ctx = template_context(cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
     templates = []
+    # Local paths are templates too (staging_dir, ledger_db,
+    # log_file): they render against the job context at use time,
+    # per run -- so they validate against exactly that context,
+    # with no name/ext/run_id extras to render them with.
+    for where, template in (
+        ("staging_dir", cfg.staging_dir),
+        ("ledger_db", cfg.ledger_db),
+        ("log_file", cfg.log_file),
+    ):
+        if template:
+            templates.append((where, template))
     if cfg.destination.directory:
         templates.append(("destination", cfg.destination.directory))
     if isinstance(cfg.source, RemoteFilesSourceConfig):

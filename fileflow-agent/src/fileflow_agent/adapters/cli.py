@@ -17,6 +17,7 @@ from pathlib import Path
 
 from ..application.download import DownloadAndUploadUseCase
 from ..application.pickup import PickupUseCase
+from ..domain.integrity import Context
 from ..domain.ports import Notifier
 from ..infrastructure.config import AgentConfig, ConfigError, load_config
 from ..infrastructure.filesystem import log, setup_logging
@@ -25,6 +26,13 @@ from ..infrastructure.persistence import SqlAlchemyRunRepository
 from ..infrastructure.sources import build_source
 from ..infrastructure.transport import build_transport
 from ..infrastructure.website import WebsiteUploader
+
+
+def _context(cfg: AgentConfig) -> Context:
+    """One Context per tick: the date in every local path is this
+    tick's date, not the process's startup date. The builders run
+    inside the loop, so each tick gets a fresh one."""
+    return Context(cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
 
 
 def build_download_use_case(cfg: AgentConfig, *, notifier: Notifier | None = None):
@@ -38,7 +46,7 @@ def build_download_use_case(cfg: AgentConfig, *, notifier: Notifier | None = Non
     if cfg.source is None:
         raise ValueError("config has no 'source' section; download mode needs one")
     transport = build_transport(cfg.destination.transport)
-    repository = SqlAlchemyRunRepository(Path(cfg.ledger_db))
+    repository = SqlAlchemyRunRepository(Path(_context(cfg).local_path(cfg.ledger_db)))
     use_case = DownloadAndUploadUseCase(
         cfg,
         source=build_source(
@@ -57,7 +65,7 @@ def build_pickup_use_case(cfg: AgentConfig, *, notifier: Notifier | None = None)
     The uploader is None when the config has no ``deliver`` section;
     the use case then does nothing."""
     transport = build_transport(cfg.destination.transport)
-    repository = SqlAlchemyRunRepository(Path(cfg.ledger_db))
+    repository = SqlAlchemyRunRepository(Path(_context(cfg).local_path(cfg.ledger_db)))
     uploader = WebsiteUploader(cfg.deliver) if cfg.deliver is not None else None
     use_case = PickupUseCase(
         cfg,
@@ -107,8 +115,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {e}", file=sys.stderr)
         return 2
     # Logging is set up after the config loads, so the config's
-    # log_file (when set) takes effect from the first run.
-    setup_logging(args.log_level, log_file=cfg.log_file)
+    # log_file (when set) takes effect from the first run. log_file
+    # is a template: it is resolved here and again each tick, so a
+    # date-partitioned log follows the day, not the startup day.
+    setup_logging(
+        args.log_level,
+        log_file=_context(cfg).local_path(cfg.log_file) if cfg.log_file else None,
+    )
     if args.check_config:
         dest = cfg.destination.transport
         where = dest.root if dest.kind == "local" else f"{dest.host}:{dest.port}"
@@ -127,6 +140,8 @@ def main(argv: list[str] | None = None) -> int:
     while True:
         failed = False
         try:
+            if cfg.log_file:
+                setup_logging(args.log_level, log_file=_context(cfg).local_path(cfg.log_file))
             if args.mode in ("download", "both"):
                 with _opened(lambda: build_download_use_case(cfg)) as use_case:
                     use_case.run()

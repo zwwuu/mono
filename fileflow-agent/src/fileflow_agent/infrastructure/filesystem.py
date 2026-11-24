@@ -29,7 +29,8 @@ def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> No
     handler exists (e.g. under pytest), so the agent logger's own
     level is set here too -- otherwise INFO would never reach the
     file handler. Calling this twice with the same file adds only
-    one file handler."""
+    one file handler; calling it with a different file switches to
+    the new one (the old file handler is closed first)."""
     lvl = getattr(logging, level.upper(), logging.INFO)
     fmt = "%(asctime)s %(levelname)s %(name)s %(message)s"
     logging.basicConfig(level=lvl, format=fmt)
@@ -39,11 +40,14 @@ def setup_logging(level: str = "INFO", log_file: str | Path | None = None) -> No
     path = Path(log_file)
     path.parent.mkdir(parents=True, exist_ok=True)
     root = logging.getLogger()
-    for handler in root.handlers:
-        if isinstance(handler, TimedRotatingFileHandler) and (
-            Path(handler.baseFilename).resolve() == path.resolve()
-        ):
-            return
+    for handler in list(root.handlers):
+        if isinstance(handler, TimedRotatingFileHandler):
+            if Path(handler.baseFilename).resolve() == path.resolve():
+                return
+            # The log file changed (a date template rolled over):
+            # stop writing to the old file before opening the new one.
+            root.removeHandler(handler)
+            handler.close()
     file_handler = TimedRotatingFileHandler(path, when="midnight", backupCount=7)
     file_handler.setFormatter(logging.Formatter(fmt))
     file_handler.setLevel(lvl)

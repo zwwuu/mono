@@ -97,6 +97,7 @@ src/fileflow_agent/
     ports.py       RunRepository / Transport / Source / WebsiteUploader
     integrity.py   rename rules (safe_name, render_name) + template
                    rendering (template_context, render_template)
+                   + Context: one run's values, path resolution
     procedures.py  procedure registry + built-ins
                    (rename-only, normalize-csv, uppercase-headers-csv)
   application/     use cases, written only against domain ports
@@ -244,12 +245,20 @@ they go to `incoming/<job>/`, which the watcher scans. Only set
 it out, or the watcher never sees the uploads.
 
 Templates (`remote-files` directory/name, `destination.directory`,
-`rename_pattern`) render per run from the job's own context:
+`rename_pattern`, and the local paths `staging_dir`, `ledger_db`,
+`log_file`) render per run from the job's own context:
 `{year}` `{month}` `{day}` (the run date's components, local
 time), `{date}` `{time}` (in the job's `date_format` /
 `time_format`), `{job}`, `{category}` (from the job config's `category`),
 and the job's `variables`. An unknown token fails the run loud
-instead of leaving `{token}` in a path.
+instead of leaving `{token}` in a path. One `Context` object per
+run holds those values: `local_path` renders a template and
+absolutizes it against the working directory, `remote_path`
+renders and normalizes a posix path without anchoring it to any
+local directory (remote paths are relative to the transport
+root). The parser render-checks every template at startup; the
+Context is built fresh per run, so a `--loop` process crossing
+midnight renders the new day, not the startup day.
 
 ## Notifications and logs
 
@@ -266,7 +275,9 @@ failure is logged and the run's own outcome stands.
 
 `log_file` is a path for a rotating file log (midnight rotation, 7
 backups) carrying the same records as the console. Without it the
-agent logs to the console only.
+agent logs to the console only. It is a template (see above): a
+date-partitioned log follows the day, switching files when the
+date rolls over.
 
 `source` is one of:
 - `website`: `url`, `timeout_seconds` (default 60).

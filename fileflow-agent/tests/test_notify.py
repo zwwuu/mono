@@ -347,3 +347,25 @@ def test_setup_logging_same_file_twice_adds_one_handler(tmp_path: Path):
         assert count == 1
     finally:
         _remove_file_handlers()
+
+
+def test_setup_logging_different_file_switches_handler(tmp_path: Path):
+    # A date template rolling over: the old file stops receiving
+    # records, the new one gets them, and there is still one handler.
+    first = tmp_path / "agent-20200101.log"
+    second = tmp_path / "agent-20200102.log"
+    try:
+        setup_logging("INFO", log_file=first)
+        log.info("first file")
+        setup_logging("INFO", log_file=second)
+        log.info("second file")
+        handlers = [
+            h for h in logging.getLogger().handlers if isinstance(h, TimedRotatingFileHandler)
+        ]
+        assert len(handlers) == 1
+        assert Path(handlers[0].baseFilename) == second
+        assert "first file" in first.read_text(encoding="utf-8")
+        assert "second file" not in first.read_text(encoding="utf-8")
+        assert "second file" in second.read_text(encoding="utf-8")
+    finally:
+        _remove_file_handlers()
