@@ -103,8 +103,8 @@ src/fileflow_agent/
     download.py    DownloadAndUploadUseCase (website/local -> FTP)
     pickup.py      PickupUseCase (FTP outgoing -> website)
   infrastructure/  the outside world, behind the ports
-    config.py      config parser: JSON dict -> typed config, fails
-                   loud at startup with every problem listed
+    config.py      config parser: one builder over the dataclasses,
+                   fails loud at startup on the first problem
     filesystem.py  sha256, manifest I/O, atomic .part+rename
     persistence.py SQLAlchemy run ledger (RunRepository) + Alembic model
     transport.py   uploads/downloads: local (tests/pilot), ftp, sftp (paramiko);
@@ -181,14 +181,14 @@ The config file is parsed once, at startup, before any run starts
 (`infrastructure/config.py`): the raw JSON becomes a typed config
 (one dataclass per source type, a transport dataclass shared by
 `destination` and the remote sources), and anything wrong raises
-one `ConfigError` listing *every* problem found -- missing keys,
-wrong types, unknown keys, unknown source/transport kinds, unknown
-template tokens, out-of-range values -- instead of failing on the
-first one, or halfway through a run with a bare `KeyError`. Check a
+one `ConfigError` naming the first problem found -- a missing key,
+a wrong type, an unknown key, an unknown source/transport kind, an
+unknown template token, an out-of-range value -- instead of failing
+halfway through a run with a bare `KeyError`. Check a
 config without running it:
 
 ```bash
-fileflow-agent --config config/agent.json --check-config   # exit 0 when valid, 2 with the problems listed
+fileflow-agent --config config/agent.json --check-config   # exit 0 when valid, 2 with the first problem named
 ```
 
 A config without a `source` section is valid (a pickup-only job);

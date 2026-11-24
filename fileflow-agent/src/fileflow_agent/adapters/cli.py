@@ -96,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--check-config",
         action="store_true",
-        help="parse the config and exit: 0 when it is valid, 2 with the problems listed",
+        help="parse the config and exit: 0 when it is valid, 2 with the first problem named",
     )
     args = ap.parse_args(argv)
     try:

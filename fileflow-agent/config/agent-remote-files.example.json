@@ -1,6 +1,6 @@
 {
   "destination": {
-    "directory": "/home/fileflow/inbox/{year}{month}",
+    "path": "/home/fileflow/inbox/{year}{month}",
     "host": "192.168.10.20",
     "port": 22,
     "transport": "sftp",
@@ -9,8 +9,6 @@
   "job": "ftp-inbox",
   "category": "sales",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
-  "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
   "source": {
     "files": [
       {
@@ -32,11 +30,9 @@
       }
     ],
     "host": "192.168.10.30",
-    "min_age_seconds": 5,
     "password_env": "APP_FTP_PASSWORD",
     "port": 21,
     "transport": "ftp",
-    "type": "remote-files",
     "username": "fileflow"
   },
   "staging_dir": "/var/lib/fileflow-agent/staging"

@@ -1,4 +1,4 @@
-"""Config parser tests: one error, every problem; valid configs parse.
+"""Config parser tests: fail fast -- one error, the first problem; valid configs parse.
 
 The parser is the single source of truth for the config shape, so
 the shipped example configs are parsed here too -- a bad example
@@ -143,14 +143,13 @@ def test_all_example_configs_parse():
         parse_config(json.loads(path.read_text(encoding="utf-8")))
 
 
-def test_missing_required_keys_all_reported():
+def test_missing_required_keys_reports_first_only():
+    # Check order: 'job' is the first required key checked, so an
+    # empty config reports only that -- not staging_dir, ledger_db
+    # or the missing destination.
     with pytest.raises(ConfigError) as exc:
         parse_config({})
-    msg = str(exc.value)
-    for key in ("'job'", "'staging_dir'", "'ledger_db'"):
-        assert key in msg
-    assert "destination: must be an object" in msg
-    assert "4 problems" in msg
+    assert str(exc.value) == "config: missing required key 'job'"
 
 
 def test_unknown_top_level_key():
@@ -334,16 +333,14 @@ def test_wrong_types_and_values(override, field):
         parse_config(_base(**override))
 
 
-def test_multiple_problems_reported_at_once():
+def test_multiple_problems_reports_first_only():
+    # Three problems, one error: the missing 'job' is checked before
+    # the unknown procedure and before the destination's bad port.
     cfg = _base(procedure="nope", destination={"transport": "ftp", "host": "h", "port": 70000})
     del cfg["job"]
     with pytest.raises(ConfigError) as exc:
         parse_config(cfg)
-    msg = str(exc.value)
-    assert "3 problems" in msg
-    assert "missing required key 'job'" in msg
-    assert "unknown procedure 'nope'" in msg
-    assert "'port' must be <= 65535" in msg
+    assert str(exc.value) == "config: missing required key 'job'"
 
 
 def test_notify_parses_with_defaults():
