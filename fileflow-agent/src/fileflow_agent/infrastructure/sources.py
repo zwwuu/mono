@@ -111,19 +111,13 @@ class DirectorySource:
 
 def build_source(
     source: SourceConfig,
-    job: str,
-    category: str | None = None,
     variables: dict | None = None,
-    date_format: str = "%Y%m%d",
-    time_format: str = "%H%M%S",
 ) -> Source:
-    """Build a source from a parsed ``source`` section. ``job``,
-    ``category``, ``variables`` and the date/time formats are the
-    template context a source needs ({job}, {category}, the job's own
-    tokens, {date}/{time} in the job's formats); sources that do
-    not template anything ignore them. The config parser has
-    already validated the section, so an unknown type cannot reach
-    this function."""
+    """Build a source from a parsed ``source`` section. ``variables``
+    is the job's template context (remote-files templates render
+    against it); sources that do not template anything ignore it.
+    The config parser has already validated the section, so an
+    unknown type cannot reach this function."""
     if source.type == "website":
         return WebsiteSource(source)
     if source.type == "local":
@@ -133,7 +127,7 @@ def build_source(
     if source.type == "remote-dir":
         return RemoteDirectorySource(source)
     if source.type == "remote-files":
-        return RemoteFilesSource(source, job, category, variables, date_format, time_format)
+        return RemoteFilesSource(source, variables)
     if source.type == "smb":
         from .smb_source import SmbSource
 
@@ -211,17 +205,17 @@ class RemoteFilesSource:
     """Fetch named files from a remote server (FTP/SFTP).
 
     ``files`` is a list of {"directory", "name"} templates, rendered
-    per run from the run date ({year} {month} {day}) and job-level
-    values ({job}, {category} -- the job's category). All of them
-    are one batch under one manifest. Every listed file is required
-    by default: a missing, empty, or still-being-written file fails
-    the run loud instead of uploading a partial batch -- a named
-    file was explicitly asked for, so its absence is an error, not
-    "no files". An entry with ``"optional": true`` is the exception:
-    when it is missing, empty, or still being written it is logged
-    and skipped, and the batch ships without it. If every entry is
-    optional and none is ready, the source returns no files and the
-    run is SKIPPED (no manifest, no upload).
+    per run against the job's ``variables`` -- there are no built-in
+    tokens, so a template can only use what the job declares. All of
+    them are one batch under one manifest. Every listed file is
+    required by default: a missing, empty, or still-being-written
+    file fails the run loud instead of uploading a partial batch --
+    a named file was explicitly asked for, so its absence is an
+    error, not "no files". An entry with ``"optional": true`` is the
+    exception: when it is missing, empty, or still being written it
+    is logged and skipped, and the batch ships without it. If every
+    entry is optional and none is ready, the source returns no files
+    and the run is SKIPPED (no manifest, no upload).
 
     Connection comes from the source config; the password resolves
     the same way as the upload transport (env var first, literal
@@ -233,19 +227,11 @@ class RemoteFilesSource:
     def __init__(
         self,
         cfg: RemoteFilesSourceConfig,
-        job: str,
-        category: str | None = None,
         variables: dict | None = None,
-        date_format: str = "%Y%m%d",
-        time_format: str = "%H%M%S",
         transport: Transport | None = None,
     ):
         self.cfg = cfg
-        self.job = job
-        self.category = category
         self.variables = variables or {}
-        self.date_format = date_format
-        self.time_format = time_format
         self.files = cfg.files
         if not self.files:
             raise ValueError("remote-files source needs a non-empty 'files' list")
@@ -262,9 +248,8 @@ class RemoteFilesSource:
 
     def download(self, dest_dir: Path, run_id: str) -> list[Path]:
         dest_dir.mkdir(parents=True, exist_ok=True)
-        # One Context per download: the date in every template is
-        # this run's date, not the process's startup date.
-        ctx = Context(self.job, self.category, self.variables, self.date_format, self.time_format)
+        # One Context per download, from the job's variables only.
+        ctx = Context(self.variables)
         transport = self._open_transport()
         try:
             staged: list[Path] = []

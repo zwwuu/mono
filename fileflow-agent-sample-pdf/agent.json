@@ -1,6 +1,7 @@
 {
+    "category": "pdf",
     "destination": {
-        "directory": "reports/{year}{month}",
+        "directory": "reports",
         "host": "192.168.10.20",
         "password_env": "FILEFLOW_FTP_PASSWORD",
         "port": 21,
@@ -8,7 +9,6 @@
         "username": "fileflow"
     },
     "job": "monthly-report",
-    "category": "pdf",
     "ledger_db": "/var/lib/fileflow-agent/agent.db",
     "procedure": "rename-pdf-report",
     "procedures_module": "procedures_local",

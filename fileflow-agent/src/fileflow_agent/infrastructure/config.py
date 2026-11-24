@@ -17,9 +17,9 @@ anything. Secrets still resolve at build time, env-first with a
 literal fallback, as before.
 
 One config is one job. Templates render against the job's own
-context -- its ``variables`` plus {date}/{time} in the job's own
-formats -- so a typo fails at startup but a future app's own
-tokens are never 'unknown'.
+``variables`` and nothing else -- there are no built-in tokens --
+so a typo fails at startup but a future app's own tokens are
+never 'unknown'.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from pathlib import Path
 from types import UnionType
 from typing import ClassVar, Union, get_args, get_origin, get_type_hints
 
-from ..domain.integrity import render_name, render_template, template_context
+from ..domain.integrity import render_name, render_template
 from ..domain.procedures import get_procedure
 from .playwright_source import PlaywrightSourceError
 from .playwright_source import validate_actions as validate_playwright_actions
@@ -58,21 +58,10 @@ _RANGES = {
     "timeout_seconds": (1, None),
     "min_age_seconds": (0, None),
 }
-# Every token the framework itself provides, across directory
-# templates and rename patterns. A job variable colliding with
-# one of these is a config error -- the built-in always wins.
-TEMPLATE_BUILTINS = {
-    "year",
-    "month",
-    "day",
-    "date",
-    "time",
-    "job",
-    "category",
-    "name",
-    "ext",
-    "run_id",
-}
+# Tokens the renderer supplies per file, which always win at
+# render time. A job variable by one of these names could never
+# render, so it is a config error -- a silent trap otherwise.
+PER_RENDER_TOKENS = {"name", "ext", "run_id"}
 
 
 class ConfigError(ValueError):
@@ -224,11 +213,9 @@ class AgentConfig:
     source: SourceConfig | None = None
     category: str | None = None
     variables: dict[str, str] = field(default_factory=dict)
-    date_format: str = "%Y%m%d"
-    time_format: str = "%H%M%S"
     procedure: str = "rename-only"
     expect_csv: bool = False
-    rename_pattern: str = "{date}_{name}{ext}"
+    rename_pattern: str = "{name}{ext}"
     deliver: DeliverConfig | None = None
     procedures_module: str | None = None
     notify: NotifyConfig | None = None
@@ -449,9 +436,9 @@ def parse_config(data: object) -> AgentConfig:
         for name, value in variables.items():
             if not isinstance(name, str) or not name.isidentifier():
                 raise ConfigError(f"config: variable names must be identifiers, got {name!r}")
-            if name in TEMPLATE_BUILTINS:
+            if name in PER_RENDER_TOKENS:
                 raise ConfigError(
-                    f"config: variable {name!r} collides with built-in token {name!r}"
+                    f"config: variable {name!r} collides with per-render token {name!r}"
                 )
             if not isinstance(value, str):
                 raise ConfigError(f"config: variable {name!r} must be a string, got {value!r}")
@@ -465,15 +452,12 @@ def parse_config(data: object) -> AgentConfig:
             cfg.rename_pattern,
             name="x",
             ext=".csv",
-            job=cfg.job or "job",
             run_id="0" * 16,
             variables=cfg.variables,
-            date_format=cfg.date_format,
-            time_format=cfg.time_format,
         )
     except (ValueError, KeyError) as e:
         raise ConfigError(f"config: 'rename_pattern' {cfg.rename_pattern!r} is invalid: {e}") from e
-    ctx = template_context(cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
+    ctx = dict(cfg.variables)
     templates = []
     # Local paths are templates too (staging_dir, ledger_db,
     # log_file): they render against the job context at use time,
@@ -503,20 +487,11 @@ def parse_config(data: object) -> AgentConfig:
 
 def parse_source(data: object) -> SourceConfig:
     """Parse one ``source`` section on its own (tests, and anything
-    that builds a source without a whole config). Templates are
-    checked against dummy job/kind values: only unknown tokens
-    other than {job}/{category} are reported here."""
-    src = _build_source(data, "source")
-    if isinstance(src, RemoteFilesSourceConfig):
-        ctx = template_context("job", "category", {}, "%Y%m%d", "%H%M%S")
-        for i, f in enumerate(src.files):
-            for template in (f.directory, f.name):
-                if template:
-                    try:
-                        render_template(template, ctx)
-                    except ValueError as e:
-                        raise ConfigError(f"source.files[{i}]: {e}") from e
-    return src
+    that builds a source without a whole config). Templates are NOT
+    checked here: a source on its own has no variables to render
+    them against, so any token could be valid. ``parse_config``
+    checks them against the job's variables."""
+    return _build_source(data, "source")
 
 
 def parse_transport(data: object, *, default_kind: str = "ftp") -> TransportConfig:

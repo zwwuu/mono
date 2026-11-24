@@ -29,10 +29,9 @@ from ..infrastructure.website import WebsiteUploader
 
 
 def _context(cfg: AgentConfig) -> Context:
-    """One Context per tick: the date in every local path is this
-    tick's date, not the process's startup date. The builders run
-    inside the loop, so each tick gets a fresh one."""
-    return Context(cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
+    """One Context per tick, from the job's variables only. The
+    builders run inside the loop, so each tick gets a fresh one."""
+    return Context(cfg.variables)
 
 
 def build_download_use_case(cfg: AgentConfig, *, notifier: Notifier | None = None):
@@ -49,9 +48,7 @@ def build_download_use_case(cfg: AgentConfig, *, notifier: Notifier | None = Non
     repository = SqlAlchemyRunRepository(Path(_context(cfg).local_path(cfg.ledger_db)))
     use_case = DownloadAndUploadUseCase(
         cfg,
-        source=build_source(
-            cfg.source, cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
-        ),
+        source=build_source(cfg.source, cfg.variables),
         transport=transport,
         repository=repository,
         notifier=notifier if notifier is not None else SmtpNotifier(cfg.notify),
@@ -116,8 +113,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     # Logging is set up after the config loads, so the config's
     # log_file (when set) takes effect from the first run. log_file
-    # is a template: it is resolved here and again each tick, so a
-    # date-partitioned log follows the day, not the startup day.
+    # is a template: it is resolved here and again each tick.
     setup_logging(
         args.log_level,
         log_file=_context(cfg).local_path(cfg.log_file) if cfg.log_file else None,

@@ -119,9 +119,8 @@ class DownloadAndUploadUseCase:
         job = cfg.job
         run_id = new_run_id()
         started = time.monotonic()
-        # One Context per run: the date in every template is this
-        # run's date, not the process's startup date.
-        ctx = Context(job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format)
+        # One Context per run, from the job's variables only.
+        ctx = Context(cfg.variables)
         staging = Path(ctx.local_path(cfg.staging_dir)) / run_id
         staging.mkdir(parents=True, exist_ok=True)
         log.info("run %s job=%s starting", run_id, job)
@@ -227,9 +226,8 @@ class DownloadAndUploadUseCase:
 
             # 5-6. upload every output first, manifest last; verify; clean up.
             # The destination is a templated directory when the config
-            # names one (destination.directory, e.g. a date-partitioned
-            # inbox for a direct drop); otherwise the classic
-            # incoming/<job>/ the watcher scans.
+            # names one (destination.directory, for a direct drop);
+            # otherwise the classic incoming/<job>/ the watcher scans.
             dir_template = cfg.destination.directory
             if dir_template:
                 remote_dir = ctx.remote_path(dir_template)

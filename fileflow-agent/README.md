@@ -26,8 +26,8 @@ stable file matching a glob in a drop folder (`local-dir` with
 files), every stable file in a remote directory (`remote-dir` over
 FTP/SFTP, same selection rules), the named files in a `files`
 list (`remote-files` over FTP/SFTP — each entry a `directory` +
-`name` template rendered per run from the run date and job-level
-values, every listed file required), every stable file on a Windows
+`name` template rendered per run from the job's `variables`,
+every listed file required), every stable file on a Windows
 share (`smb`, via `smbprotocol`), or the downloads produced by
 driving a portal — `selenium` in the PC's Chrome, or `playwright`
 in Playwright's bundled Chromium. Both take the same action script
@@ -48,9 +48,8 @@ Chrome (a user profile, extensions, corporate SSO):
    the run_id is the run's identity.
 5. Upload every output file, then the manifest *last*, via `.part` +
    rename, to the destination directory — `destination.directory`
-   when the config names one (a templated directory, e.g. a
-   date-partitioned inbox for a direct drop with no watcher), else
-   `incoming/<job>/` on the FTP server. The manifest rename is the
+   when the config names one (a templated directory for a direct
+   drop with no watcher), else `incoming/<job>/` on the FTP server. The manifest rename is the
    trigger that tells the watcher the batch is complete. Multi-file
    batches upload concurrently (4 workers, each with its own
    transport connection); the manifest still goes last, alone.
@@ -96,8 +95,8 @@ src/fileflow_agent/
     entities.py    RunRecord, run states (Manifest lives in fileflow-contract)
     ports.py       RunRepository / Transport / Source / WebsiteUploader
     integrity.py   rename rules (safe_name, render_name) + template
-                   rendering (template_context, render_template)
-                   + Context: one run's values, path resolution
+                   rendering (render_template) + Context: one run's
+                   values, path resolution
     procedures.py  procedure registry + built-ins
                    (rename-only, normalize-csv, uppercase-headers-csv)
   application/     use cases, written only against domain ports
@@ -199,26 +198,25 @@ startup rather than silently doing nothing. The parser checks shape
 only: it does not check that a named env var is set, and it does
 not connect to anything.
 
-`job`, `category` (optional job-level value, usable as a `{category}` token
-in templates), `variables` (the job's own arbitrary template
-tokens, name -> string), `date_format` / `time_format` (strftime,
-defaults `%Y%m%d` / `%H%M%S`, driving the `{date}` / `{time}`
-tokens), `source`, `expect_csv`, `procedure`, `procedures_module`
-(see below), `rename_pattern` (tokens `{date} {time} {name} {ext}
-{job} {run_id}`, plus the job's `variables`), `staging_dir`, `ledger_db`,
-`destination` (`transport: local|ftp|sftp`, `host`, `port`,
-`username`, and an optional `directory` template for the upload
-target), `deliver` (`upload_url`, `form_field`, `auth_env`,
-`timeout_seconds`), `notify` (see below), and `log_file` (see below).
+`job`, `category` (an optional job-level value), `variables` (the job's
+own arbitrary template tokens, name -> string), `source`,
+`expect_csv`, `procedure`, `procedures_module` (see below),
+`rename_pattern` (tokens `{name} {ext} {run_id}`, plus the job's
+`variables`), `staging_dir`, `ledger_db`, `destination`
+(`transport: local|ftp|sftp`, `host`, `port`, `username`, and an
+optional `directory` template for the upload target), `deliver`
+(`upload_url`, `form_field`, `auth_env`, `timeout_seconds`), `notify`
+(see below), and `log_file` (see below).
 
 The filename render is the job's business logic, not the
-framework's: each job has its own datetime format and its own
-arbitrary variables, and the parser validates templates against
-the context built from that job's config -- so a typo still fails
-at startup, but a future app's own tokens are never "unknown". A
-variable name must be an identifier and must not collide with a
-built-in token (`year`, `month`, `day`, `date`, `time`, `job`,
-`category`, `name`, `ext`, `run_id`).
+framework's: each job has its own arbitrary variables, and the
+parser validates templates against the job's `variables` -- so a
+typo still fails at startup, but a future app's own tokens are
+never "unknown". There are no built-in tokens: no `{date}`, no
+`{job}`, no `{year}`. A variable name must be an identifier and
+must not collide with a per-render token (`name`, `ext`, `run_id`)
+-- those always win at render time, so a variable by that name
+could never render.
 
 Custom procedures live outside the agent: write them in a module
 next to the config (e.g. `procedures_local.py`), register each with
@@ -246,19 +244,15 @@ it out, or the watcher never sees the uploads.
 
 Templates (`remote-files` directory/name, `destination.directory`,
 `rename_pattern`, and the local paths `staging_dir`, `ledger_db`,
-`log_file`) render per run from the job's own context:
-`{year}` `{month}` `{day}` (the run date's components, local
-time), `{date}` `{time}` (in the job's `date_format` /
-`time_format`), `{job}`, `{category}` (from the job config's `category`),
-and the job's `variables`. An unknown token fails the run loud
-instead of leaving `{token}` in a path. One `Context` object per
-run holds those values: `local_path` renders a template and
-absolutizes it against the working directory, `remote_path`
-renders and normalizes a posix path without anchoring it to any
-local directory (remote paths are relative to the transport
-root). The parser render-checks every template at startup; the
-Context is built fresh per run, so a `--loop` process crossing
-midnight renders the new day, not the startup day.
+`log_file`) render per run from the job's `variables` and nothing
+else. An unknown token fails the run loud instead of leaving
+`{token}` in a path. One `Context` object per run holds those
+values: `local_path` renders a template and absolutizes it against
+the working directory, `remote_path` renders and normalizes a posix
+path without anchoring it to any local directory (remote paths are
+relative to the transport root). The parser render-checks every
+template at startup against the job's `variables`; the Context is
+built fresh per run.
 
 ## Notifications and logs
 
@@ -275,9 +269,7 @@ failure is logged and the run's own outcome stands.
 
 `log_file` is a path for a rotating file log (midnight rotation, 7
 backups) carrying the same records as the console. Without it the
-agent logs to the console only. It is a template (see above): a
-date-partitioned log follows the day, switching files when the
-date rolls over.
+agent logs to the console only. It is a template (see above).
 
 `source` is one of:
 - `website`: `url`, `timeout_seconds` (default 60).

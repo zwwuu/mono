@@ -10,7 +10,6 @@ from __future__ import annotations
 import os
 import posixpath
 import re
-from datetime import datetime
 from pathlib import Path
 
 _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
@@ -27,60 +26,30 @@ def render_name(
     *,
     name: str,
     ext: str,
-    job: str,
     run_id: str,
     variables: dict | None = None,
-    date_format: str = "%Y%m%d",
-    time_format: str = "%H%M%S",
 ) -> str:
-    """Render a rename pattern. Tokens: the job's context
-    ({year} {month} {day} {date} {time} {job} {category} plus the
-    job's own ``variables``) and the per-file {name} {ext} {run_id}.
-
-    The filename render is business logic, not framework logic:
-    {date}/{time} use the job's own formats (default YYYYMMDD /
-    HHMMSS), and ``variables`` are the job's arbitrary tokens
-    (e.g. a client or region name). A variable colliding with a
-    built-in token is rejected by the config parser, so here the
-    built-ins always win."""
-    return Context(job, None, variables, date_format, time_format).render_name(
-        pattern, name=name, ext=ext, run_id=run_id
-    )
+    """Render a rename pattern. Tokens: the job's own ``variables``
+    and the per-file {name} {ext} {run_id}. There are no built-in
+    tokens -- no {date}, no {job}: a job that wants a date or a
+    client name in its output names puts it in ``variables`` (or in
+    the procedure, which owns the name by business logic)."""
+    return Context(variables).render_name(pattern, name=name, ext=ext, run_id=run_id)
 
 
 class Context:
     """One run's template values: renders {placeholders} and
-    resolves paths. The values are exactly template_context's
-    (year/month/day/date/time/job/category + the job's variables);
-    per-render extras (name/ext/run_id) ride along on the call.
+    resolves paths. The values are exactly the job's declared
+    ``variables`` -- nothing is injected. Per-render extras
+    (name/ext/run_id) ride along on the call.
 
     Built fresh per run (per loop tick), never once at import or
-    config load, so the date is the run's date -- a --loop process
-    crossing midnight renders the new day, not the startup day.
+    config load, so a template that reads a variable file (or a
+    future variables source) sees this run's values.
     """
 
-    def __init__(
-        self,
-        job: str,
-        category: str | None = None,
-        variables: dict | None = None,
-        date_format: str = "%Y%m%d",
-        time_format: str = "%H%M%S",
-        *,
-        when: datetime | None = None,
-    ):
-        now = when or datetime.now()
+    def __init__(self, variables: dict | None = None):
         self.values = dict(variables or {})
-        self.values.update(
-            year=f"{now.year:04d}",
-            month=f"{now.month:02d}",
-            day=f"{now.day:02d}",
-            date=now.strftime(date_format),
-            time=now.strftime(time_format),
-            job=job,
-        )
-        if category is not None:
-            self.values["category"] = str(category)
 
     def render(self, template: str, **extra: str) -> str:
         """Render a template against this run's values plus extras.
@@ -111,24 +80,6 @@ class Context:
         paths are relative to the transport root and are never
         anchored to any local directory."""
         return posixpath.normpath(self.render(template, **extra))
-
-
-def template_context(
-    job: str,
-    category: str | None = None,
-    variables: dict | None = None,
-    date_format: str = "%Y%m%d",
-    time_format: str = "%H%M%S",
-) -> dict:
-    """Tokens for directory/name templates: the run date plus the
-    job's own values. {year}/{month}/{day} are the date's
-    zero-padded components; {date}/{time} use the job's own
-    formats; {category} is there only when the job sets a category; and
-    ``variables`` are the job's arbitrary tokens. The token set is
-    the job's business logic -- a future app with different
-    formats or its own variables gets its own context, and the
-    parser validates templates against exactly this context."""
-    return Context(job, category, variables, date_format, time_format).values
 
 
 def render_template(template: str, context: dict) -> str:

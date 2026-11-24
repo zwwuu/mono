@@ -1,33 +1,33 @@
 {
+  "category": "sales",
   "destination": {
-    "directory": "/home/fileflow/inbox/{year}{month}",
+    "directory": "/home/fileflow/inbox/{client}",
     "host": "192.168.10.20",
     "port": 22,
     "transport": "sftp",
     "username": "fileflow"
   },
   "job": "ftp-inbox",
-  "category": "sales",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
+  "rename_pattern": "{name}{ext}",
   "source": {
     "files": [
       {
-        "directory": "/home/fileflow/inbox/{year}{month}",
-        "name": "Test1-{year}-{month}-{day}.csv"
+        "directory": "/home/fileflow/inbox/{client}",
+        "name": "Test1-{client}.csv"
       },
       {
-        "directory": "/home/fileflow/inbox/{year}",
-        "name": "Test2-{year}-{month}-{day}.csv"
+        "directory": "/home/fileflow/inbox/{client}",
+        "name": "Test2-{client}.csv"
       },
       {
-        "directory": "/home/fileflow/inbox/{category}",
-        "name": "Test3-{category}.csv"
+        "directory": "/home/fileflow/inbox/{client}",
+        "name": "Test3-{client}.csv"
       },
       {
-        "directory": "/home/fileflow/inbox/{category}",
-        "name": "Test4-{category}.csv",
+        "directory": "/home/fileflow/inbox/{client}",
+        "name": "Test4-{client}.csv",
         "optional": true
       }
     ],
@@ -39,5 +39,8 @@
     "type": "remote-files",
     "username": "fileflow"
   },
-  "staging_dir": "/var/lib/fileflow-agent/staging"
+  "staging_dir": "/var/lib/fileflow-agent/staging",
+  "variables": {
+    "client": "acme"
+  }
 }

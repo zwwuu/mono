@@ -47,7 +47,7 @@ playwright install chromium                     # once, on the PC
 It logs into the demo portal, downloads
 `Monthly-Report-ACME-20261122.pdf`, renames it to
 `ACME_20261122_monthly-report.pdf`, and copies it to
-`demo-out/ftp/reports/<yyyymm>/` — the `demo-out/ftp` directory is
+`demo-out/ftp/reports/` — the `demo-out/ftp` directory is
 the FTP server stand-in. A `<run_id>.manifest.json` lands next to
 it: the batch receipt (SHA-256 of every delivered file). Run it a
 second time and the run is SKIPPED — the ledger already recorded
@@ -78,12 +78,12 @@ whole demo script's output, teed by `run-demo.sh`. The demo has no
    raise on bad input.
 3. `rename_pattern` is the template layer on top of the
    procedure: `{name}{ext}` passes the procedure's name through
-   unchanged. If you also want the run date in the name, use
-   `{date}_{name}{ext}` instead.
-4. `destination.directory` is the FTP path, a template:
-   `reports/{year}{month}` lands in a date-partitioned folder.
-   Leave it out and uploads go to `incoming/<job>/` for the
-   watcher flow instead.
+   unchanged. The date in the name comes from the procedure
+   itself (it reads the date out of the input filename), not from
+   a template token -- there are no built-in tokens.
+4. `destination.directory` is the FTP path, a template: it can
+   use the job's `variables`. Leave it out and uploads go to
+   `incoming/<job>/` for the watcher flow instead.
 
 ## Running it for real
 

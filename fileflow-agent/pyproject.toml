@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "fileflow-agent"
-version = "2.17.0"
+version = "2.18.0"
 description = "FileFlow Agent (Ethernet PC): download from the website, rename/format, seal with a SHA-256 manifest, upload to the FTP server; in pickup mode, upload staged files from the FTP server to the website."
 requires-python = ">=3.10"
 dependencies = ["fileflow-contract>=1.1", "sqlalchemy>=2.0", "alembic>=1.13"]

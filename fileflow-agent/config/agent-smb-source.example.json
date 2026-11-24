@@ -9,7 +9,7 @@
   "job": "smb-inbox",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
+  "rename_pattern": "{name}{ext}",
   "source": {
     "min_age_seconds": 5,
     "password_env": "FILEFLOW_SMB_PASSWORD",

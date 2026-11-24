@@ -9,7 +9,7 @@
   "job": "portal-report",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
+  "rename_pattern": "{name}{ext}",
   "source": {
     "actions": [
       {

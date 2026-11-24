@@ -72,7 +72,7 @@ def _agent_cfg(tmp_path: Path, source: Path) -> dict:
         "source": {"type": "local", "path": str(source)},
         "expect_csv": True,
         "procedure": "normalize-csv",
-        "rename_pattern": "{date}_{name}{ext}",
+        "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
@@ -294,19 +294,17 @@ def test_pickup_waits_for_partial_batch(tmp_path: Path):
         server.shutdown()
 
 
-def test_rename_uses_job_variables_and_date_format(tmp_path: Path):
+def test_rename_uses_job_variables(tmp_path: Path):
     # The filename render is the job's business logic: its own
-    # variable and its own date format land in the output name.
-    from datetime import datetime
-
+    # variable lands in the output name. There is no {date} token
+    # anymore -- a date in a name comes from the procedure or a
+    # variable, not the framework.
     source = tmp_path / "daily.csv"
     source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
     cfg = _agent_cfg(tmp_path, source)
     cfg["variables"] = {"client": "acme"}
-    cfg["date_format"] = "%Y-%m-%d"
-    cfg["rename_pattern"] = "{date}_{client}_{name}{ext}"
+    cfg["rename_pattern"] = "{client}_{name}{ext}"
     result = _run_once(cfg)
     assert result["status"] == "UPLOADED"
     incoming = tmp_path / "ftp" / "incoming" / "daily-report"
-    today = datetime.now().strftime("%Y-%m-%d")
-    assert list(incoming.glob(f"{today}_acme_daily.csv"))
+    assert list(incoming.glob("acme_daily.csv"))

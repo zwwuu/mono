@@ -9,7 +9,7 @@
   "job": "ftp-inbox",
   "ledger_db": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
-  "rename_pattern": "{date}_{name}{ext}",
+  "rename_pattern": "{name}{ext}",
   "source": {
     "host": "192.168.10.30",
     "min_age_seconds": 5,

@@ -12,7 +12,6 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
@@ -21,7 +20,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from fileflow_agent.adapters.cli import build_download_use_case
-from fileflow_agent.domain.integrity import render_template, template_context
+from fileflow_agent.domain.integrity import render_template
 from fileflow_agent.infrastructure.config import (
     PlaywrightSourceConfig,
     SeleniumSourceConfig,
@@ -110,7 +109,7 @@ def test_remote_dir_end_to_end_with_skip(tmp_path: Path):
         },
         "expect_csv": True,
         "procedure": "normalize-csv",
-        "rename_pattern": "{date}_{name}{ext}",
+        "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
@@ -543,14 +542,16 @@ def test_selenium_selectors():
 
 
 # ------------------------------------------------------------ remote-files
-def test_render_template_and_context():
-    ctx = template_context("ftp-inbox", "sales")
-    assert render_template("inbox/{year}{month}", ctx) == (f"inbox/{datetime.now():%Y%m}")
-    assert render_template("Test3-{category}.csv", ctx) == "Test3-sales.csv"
-    assert render_template("{job}-{day}.csv", ctx) == (f"ftp-inbox-{datetime.now():%d}.csv")
+def test_render_template_and_variables():
+    # Templates render against the job's variables only: no
+    # built-in tokens, so {year} is unknown even here.
+    ctx = {"client": "acme"}
+    assert render_template("inbox/{client}", ctx) == "inbox/acme"
+    assert render_template("Test-{client}.csv", ctx) == "Test-acme.csv"
     with pytest.raises(ValueError, match="unknown token"):
         render_template("Test-{nope}.csv", ctx)
-    assert "category" not in template_context("ftp-inbox")
+    with pytest.raises(ValueError, match="unknown token 'year'"):
+        render_template("inbox/{year}{month}", ctx)
 
 
 def test_resolve_password_env_wins(monkeypatch):
@@ -565,16 +566,11 @@ def test_resolve_password_env_wins(monkeypatch):
 
 
 def _remote_files_cfg(remote: Path) -> tuple[dict, dict]:
-    now = datetime.now()
-    d1 = remote / "inbox" / f"{now:%Y%m}"
+    d1 = remote / "inbox" / "acme"
     d1.mkdir(parents=True)
-    (d1 / f"Test1-{now:%Y}-{now:%m}-{now:%d}.csv").write_text("a,1\n", encoding="utf-8")
-    d2 = remote / "inbox" / f"{now:%Y}"
-    d2.mkdir(parents=True)
-    (d2 / f"Test2-{now:%Y}-{now:%m}-{now:%d}.csv").write_text("b,2\n", encoding="utf-8")
-    d3 = remote / "inbox" / "sales"
-    d3.mkdir(parents=True)
-    (d3 / "Test3-sales.csv").write_text("c,3\n", encoding="utf-8")
+    (d1 / "Test1-acme.csv").write_text("a,1\n", encoding="utf-8")
+    (d1 / "Test2-acme.csv").write_text("b,2\n", encoding="utf-8")
+    (d1 / "Test3-acme.csv").write_text("c,3\n", encoding="utf-8")
     for p in remote.rglob("*.csv"):
         os.utime(p, (time.time() - 3600, time.time() - 3600))
     source_cfg = {
@@ -583,33 +579,32 @@ def _remote_files_cfg(remote: Path) -> tuple[dict, dict]:
         "root": str(remote),
         "min_age_seconds": 5,
         "files": [
-            {"directory": "inbox/{year}{month}", "name": "Test1-{year}-{month}-{day}.csv"},
-            {"directory": "inbox/{year}", "name": "Test2-{year}-{month}-{day}.csv"},
-            {"directory": "inbox/{category}", "name": "Test3-{category}.csv"},
+            {"directory": "inbox/{client}", "name": "Test1-{client}.csv"},
+            {"directory": "inbox/{client}", "name": "Test2-{client}.csv"},
+            {"directory": "inbox/{client}", "name": "Test3-{client}.csv"},
         ],
     }
-    return source_cfg, {"job": "ftp-inbox", "category": "sales"}
+    return source_cfg, {"client": "acme"}
 
 
 def test_remote_files_downloads_named_files(tmp_path: Path):
-    source_cfg, job_cfg = _remote_files_cfg(tmp_path / "remote")
-    source = RemoteFilesSource(parse_source(source_cfg), job_cfg["job"], job_cfg.get("category"))
+    source_cfg, variables = _remote_files_cfg(tmp_path / "remote")
+    source = RemoteFilesSource(parse_source(source_cfg), variables)
     staged = source.download(tmp_path / "staging", "run-1")
-    now = datetime.now()
     assert sorted(p.name for p in staged) == [
-        f"Test1-{now:%Y}-{now:%m}-{now:%d}.csv",
-        f"Test2-{now:%Y}-{now:%m}-{now:%d}.csv",
-        "Test3-sales.csv",
+        "Test1-acme.csv",
+        "Test2-acme.csv",
+        "Test3-acme.csv",
     ]
 
 
 def test_remote_files_missing_file_fails_loud(tmp_path: Path):
-    source_cfg, job_cfg = _remote_files_cfg(tmp_path / "remote")
-    source_cfg["files"] = [{"directory": "inbox/{year}{month}", "name": "Nope.csv"}]
+    source_cfg, variables = _remote_files_cfg(tmp_path / "remote")
+    source_cfg["files"] = [{"directory": "inbox/{client}", "name": "Nope.csv"}]
     with pytest.raises(ValueError, match="file not found"):
-        RemoteFilesSource(
-            parse_source(source_cfg), job_cfg["job"], job_cfg.get("category")
-        ).download(tmp_path / "staging", "run-1")
+        RemoteFilesSource(parse_source(source_cfg), variables).download(
+            tmp_path / "staging", "run-1"
+        )
 
 
 def test_remote_files_too_young_fails_loud(tmp_path: Path):
@@ -627,32 +622,31 @@ def test_remote_files_too_young_fails_loud(tmp_path: Path):
                 "files": [{"directory": "inbox", "name": "new.csv"}],
             }
         ),
-        "ftp-inbox",
     )
     with pytest.raises(ValueError, match="still being written"):
         source.download(tmp_path / "staging", "run-1")
 
 
 def test_remote_files_end_to_end_direct_drop(tmp_path: Path):
-    source_cfg, _job_cfg = _remote_files_cfg(tmp_path / "remote")
-    now = datetime.now()
+    source_cfg, variables = _remote_files_cfg(tmp_path / "remote")
     cfg = {
         "job": "ftp-inbox",
         "category": "sales",
         "source": source_cfg,
+        "variables": variables,
         "expect_csv": True,
         "procedure": "normalize-csv",
-        "rename_pattern": "{date}_{name}{ext}",
+        "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
         "destination": {
             "transport": "local",
             "root": str(tmp_path / "dest"),
-            "directory": "inbox/{year}{month}",
+            "directory": "inbox/{client}",
         },
     }
     assert _run_once(cfg)["status"] == "UPLOADED"
-    dest_dir = tmp_path / "dest" / "inbox" / f"{now:%Y%m}"
+    dest_dir = tmp_path / "dest" / "inbox" / "acme"
     assert len(list(dest_dir.glob("*.manifest.json"))) == 1
     assert len(list(dest_dir.glob("*.csv"))) == 3
     assert not list((tmp_path / "dest").glob("incoming"))  # no watcher incoming dir
@@ -1069,7 +1063,7 @@ def test_playwright_real_browser_end_to_end(tmp_path: Path):
                 ],
             },
             "expect_csv": True,
-            "rename_pattern": "{date}_{name}{ext}",
+            "rename_pattern": "{name}{ext}",
             "staging_dir": str(tmp_path / "staging"),
             "ledger_db": str(tmp_path / "agent.db"),
             "destination": {"transport": "local", "root": str(tmp_path / "dest")},
@@ -1101,7 +1095,6 @@ def test_remote_files_optional_missing_skipped(tmp_path: Path):
                 ],
             }
         ),
-        "ftp-inbox",
     )
     staged = source.download(tmp_path / "staging", "run-1")
     assert [p.name for p in staged] == ["req.csv"]
@@ -1130,7 +1123,6 @@ def test_remote_files_optional_not_ready_skipped(tmp_path: Path):
                 ],
             }
         ),
-        "ftp-inbox",
     )
     staged = source.download(tmp_path / "staging", "run-1")
     assert [p.name for p in staged] == ["req.csv"]
@@ -1175,7 +1167,6 @@ def test_remote_files_required_missing_still_fails_loud(tmp_path: Path):
                 ],
             }
         ),
-        "ftp-inbox",
     )
     with pytest.raises(ValueError, match="file not found"):
         source.download(tmp_path / "staging", "run-1")

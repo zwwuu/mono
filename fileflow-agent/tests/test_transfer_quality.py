@@ -31,7 +31,7 @@ def _agent_cfg(tmp_path: Path, source: Path) -> dict:
         "source": {"type": "local", "path": str(source)},
         "expect_csv": True,
         "procedure": "normalize-csv",
-        "rename_pattern": "{date}_{name}{ext}",
+        "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
         "ledger_db": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},

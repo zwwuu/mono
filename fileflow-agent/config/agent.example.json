@@ -23,7 +23,7 @@
         "to": "ops@example.com"
     },
     "procedure": "normalize-csv",
-    "rename_pattern": "{date}_{name}{ext}",
+    "rename_pattern": "{name}{ext}",
     "source": {
         "timeout_seconds": 60,
         "type": "website",

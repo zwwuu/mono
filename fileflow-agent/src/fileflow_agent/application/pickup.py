@@ -74,15 +74,8 @@ class PickupUseCase:
             return {}
         job = self.cfg.job
         started = time.monotonic()
-        # One Context per pass: the date in staging_dir is this
-        # pass's date, not the process's startup date.
-        ctx = Context(
-            job,
-            self.cfg.category,
-            self.cfg.variables,
-            self.cfg.date_format,
-            self.cfg.time_format,
-        )
+        # One Context per pass, from the job's variables only.
+        ctx = Context(self.cfg.variables)
         counts: dict[str, int] = {}
         # One email per run, at the end: the outcomes of every batch
         # this pass handled. A pass that only cleared DUPLICATEs or

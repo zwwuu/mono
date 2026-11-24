@@ -44,7 +44,7 @@ def test_valid_config_parses_with_defaults():
     assert cfg.category == "sales"
     assert cfg.procedure == "rename-only"
     assert cfg.expect_csv is False
-    assert cfg.rename_pattern == "{date}_{name}{ext}"
+    assert cfg.rename_pattern == "{name}{ext}"
     assert cfg.source.type == "local"
     assert cfg.source.path == "/tmp/in.csv"
     assert cfg.destination.transport.kind == "local"
@@ -203,18 +203,23 @@ def test_unknown_template_token_fails():
         parse_config(cfg)
 
 
-def test_category_token_without_category_fails():
-    cfg = _base(
-        source={
-            "type": "remote-files",
-            "transport": "local",
-            "root": "/tmp",
-            "files": [{"directory": "inbox/{category}", "name": "Test3-{category}.csv"}],
-        }
-    )
-    del cfg["category"]
-    with pytest.raises(ConfigError, match="unknown token 'category'"):
-        parse_config(cfg)
+def test_builtin_tokens_are_gone():
+    # All seven built-ins are gone: {year} {month} {day} {date}
+    # {time} {job} {category} are unknown tokens now, even with a
+    # category set and even in a rename pattern.
+    for token in ("year", "month", "day", "date", "time", "job", "category"):
+        cfg = _base(
+            source={
+                "type": "remote-files",
+                "transport": "local",
+                "root": "/tmp",
+                "files": [{"directory": f"inbox/{{{token}}}", "name": "Test.csv"}],
+            }
+        )
+        with pytest.raises(ConfigError, match=f"unknown token '{token}'"):
+            parse_config(cfg)
+    with pytest.raises(ConfigError, match="unknown token 'date'"):
+        parse_config(_base(rename_pattern="{date}_{name}{ext}"))
 
 
 def test_old_kind_key_rejected():
@@ -264,18 +269,19 @@ def test_destination_directory_token_fails():
 
 def test_local_path_templates_validate():
     # staging_dir, ledger_db and log_file are templates too: they
-    # render against the job context at use time, per run, so an
-    # unknown token fails at startup -- and a job token parses.
+    # render against the job's variables at use time, per run, so an
+    # unknown token fails at startup -- and a job variable parses.
     cfg = parse_config(
         _base(
-            staging_dir="/tmp/staging/{job}/{date}",
-            ledger_db="/tmp/{job}.db",
-            log_file="/tmp/{job}.log",
+            variables={"client": "acme"},
+            staging_dir="/tmp/staging/{client}",
+            ledger_db="/tmp/{client}.db",
+            log_file="/tmp/{client}.log",
         )
     )
-    assert cfg.staging_dir == "/tmp/staging/{job}/{date}"
-    assert cfg.ledger_db == "/tmp/{job}.db"
-    assert cfg.log_file == "/tmp/{job}.log"
+    assert cfg.staging_dir == "/tmp/staging/{client}"
+    assert cfg.ledger_db == "/tmp/{client}.db"
+    assert cfg.log_file == "/tmp/{client}.log"
     for field, value in (
         ("staging_dir", "/tmp/staging/{nope}"),
         ("ledger_db", "/tmp/{nope}.db"),
@@ -474,64 +480,64 @@ def test_download_without_source_fails(tmp_path: Path):
 def test_job_variables_are_the_template_tokens():
     # The token set is the job's business logic: a template using
     # the job's own variable parses, and renders with its value.
-    from datetime import datetime
-
-    from fileflow_agent.domain.integrity import render_template, template_context
+    # There are no built-ins left: {date} fails even though the
+    # job used to get one for free.
+    from fileflow_agent.domain.integrity import render_template
 
     cfg = parse_config(
         _base(
             variables={"client": "acme"},
-            date_format="%Y-%m-%d",
             source={
                 "type": "remote-files",
                 "transport": "local",
                 "root": "/tmp",
-                "files": [{"directory": "inbox/{client}", "name": "Test-{date}.csv"}],
+                "files": [{"directory": "inbox/{client}", "name": "Test-{client}.csv"}],
             },
         )
     )
     assert cfg.variables == {"client": "acme"}
-    assert cfg.date_format == "%Y-%m-%d"
-    context = template_context(
-        cfg.job, cfg.category, cfg.variables, cfg.date_format, cfg.time_format
-    )
-    assert context["client"] == "acme"
-    assert context["date"] == datetime.now().strftime("%Y-%m-%d")
-    assert render_template("inbox/{client}", context) == "inbox/acme"
+    assert render_template("inbox/{client}", dict(cfg.variables)) == "inbox/acme"
+    with pytest.raises(ConfigError, match="unknown token 'date'"):
+        parse_config(
+            _base(
+                variables={"client": "acme"},
+                source={
+                    "type": "remote-files",
+                    "transport": "local",
+                    "root": "/tmp",
+                    "files": [{"directory": "inbox/{client}", "name": "Test-{date}.csv"}],
+                },
+            )
+        )
 
 
-def test_rename_pattern_uses_job_variables_and_formats():
+def test_rename_pattern_uses_job_variables():
     from fileflow_agent.domain.integrity import render_name
 
     cfg = parse_config(
         _base(
             variables={"client": "acme"},
-            date_format="%Y-%m-%d",
-            rename_pattern="{date}_{client}_{name}{ext}",
+            rename_pattern="{client}_{name}{ext}",
         )
     )
-    from datetime import datetime
-
     assert (
         render_name(
             cfg.rename_pattern,
             name="daily",
             ext=".csv",
-            job=cfg.job,
             run_id="0" * 16,
             variables=cfg.variables,
-            date_format=cfg.date_format,
-            time_format=cfg.time_format,
         )
-        == f"{datetime.now().strftime('%Y-%m-%d')}_acme_daily.csv"
+        == "acme_daily.csv"
     )
 
 
 @pytest.mark.parametrize(
     "variables, problem",
     [
-        ({"job": "x"}, "collides with built-in token 'job'"),
-        ({"date": "x"}, "collides with built-in token 'date'"),
+        ({"name": "x"}, "collides with per-render token 'name'"),
+        ({"ext": "x"}, "collides with per-render token 'ext'"),
+        ({"run_id": "x"}, "collides with per-render token 'run_id'"),
         ({"my-var": "x"}, "variable names must be identifiers"),
         ({"client": 3}, "variable 'client' must be a string"),
     ],
@@ -541,9 +547,13 @@ def test_job_variables_rejected(variables, problem):
         parse_config(_base(variables=variables))
 
 
-def test_date_format_must_not_be_empty():
-    with pytest.raises(ConfigError, match="'date_format' must be a non-empty string"):
-        parse_config(_base(date_format=""))
+def test_date_format_and_time_format_keys_rejected():
+    # They formatted {date}/{time}; with the built-ins gone they
+    # format nothing, so the keys are removed, not kept.
+    with pytest.raises(ConfigError, match="unknown key 'date_format'"):
+        parse_config(_base(date_format="%Y-%m-%d"))
+    with pytest.raises(ConfigError, match="unknown key 'time_format'"):
+        parse_config(_base(time_format="%H:%M"))
 
 
 def test_unknown_token_still_fails_with_variables_present():
