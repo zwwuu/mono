@@ -1,4 +1,11 @@
 {
+    "intake": {
+        "done_dir": "done",
+        "failed_dir": "failed",
+        "incoming_dir": "incoming",
+        "root": "/srv/ftp1",
+        "transport": "local"
+    },
     "jobs": [
         "monthly-report"
     ],
@@ -28,11 +35,5 @@
         "username": "watcher"
     },
     "share_root": "/mnt/share",
-    "intake": {
-        "done_dir": "done",
-        "failed_dir": "failed",
-        "incoming_dir": "incoming",
-        "root": "/srv/ftp1",
-        "transport": "local"
-    }
+    "stale_after_seconds": 86400
 }

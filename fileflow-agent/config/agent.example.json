@@ -11,7 +11,6 @@
         "transport": "sftp",
         "username": "fileflow"
     },
-    "expect_csv": true,
     "job": "daily-report",
     "ledger_db": "/var/lib/fileflow-agent/agent.db",
     "log_file": "/var/lib/fileflow-agent/agent.log",
@@ -22,8 +21,6 @@
         "smtp_port": 587,
         "to": "ops@example.com"
     },
-    "procedure": "normalize-csv",
-    "rename_pattern": "{name}{ext}",
     "source": {
         "timeout_seconds": 60,
         "type": "website",

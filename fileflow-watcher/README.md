@@ -29,10 +29,10 @@ decides. One scan pass does all three flows:
 **Handoff** — for each manifest in FTP 1 `incoming/<job>/`
 (one manifest is one batch, however many files it lists):
 
-1. **Wait** — every file the manifest lists must have landed
-   (the agent uploads data first, manifest last).
-2. **Verify** — re-compute SHA-256 + size of every file against
-   the manifest. Mismatch → `quarantine/<run_id>/` +
+1. **Wait** — every fresh file the manifest lists must have
+   landed (the agent uploads data first, manifest last).
+2. **Verify** — re-compute SHA-256 + size of every fresh file
+   against the manifest. Mismatch → `quarantine/<run_id>/` +
    `reason.txt`, ledger QUARANTINED. A corrupt file never
    reaches FTP 2.
 3. **Dedup** — each file is checked against the ledger (job +
@@ -40,18 +40,35 @@ decides. One scan pass does all three flows:
    Already recorded → moved straight to FTP 1 `done/<job>/`,
    no copy, no email. A changed file (new hash) copies as a
    new run; a FAILED outcome does not block a re-copy.
-4. **Copy** — the fresh files go to FTP 2 `processing/<job>/`
-   via `.part` + rename, size-verified. The manifest is NOT
-   copied: it is the agent↔watcher contract, not the
-   processor's input.
-5. **Record** — the run is SENT_TO_PROCESSING with the file
-   list in its detail. Only completed runs count for dedup.
+4. **Record** — the run is SENT_TO_PROCESSING with the file
+   list (name + sha256 + size) in its detail, BEFORE any copy.
+   A crash after this point is recoverable: the next scan
+   resumes the copy instead of starting over.
+5. **Copy** — the fresh files go to FTP 2 `processing/<job>/`
+   via `.part` + rename, size- and hash-verified (each upload
+   is downloaded back and its SHA-256 compared). Multi-file
+   batches copy concurrently (4 workers, each with its own
+   transport connection). The manifest is NOT copied: it is
+   the agent↔watcher contract, not the processor's input. A
+   file is skipped when FTP 2 already has the same name with
+   the same size. A transient failure is retried up to 3 times
+   with exponential backoff (1s, 2s); a hash mismatch fails
+   the run immediately. Each handoff and each completion logs
+   one summary line — files, total bytes, duration,
+   destination — and the completion email carries the same
+   summary.
 
 A manifest for a job that is not in `jobs` is dead-lettered to
 `failed/<run_id>/` + `reason.txt`, never guessed at. A run
-already SENT_TO_PROCESSING is left alone by the handoff scan
-(the completion scan owns it now); a run left RECEIVED by a
-crashed handoff is re-processed on the next scan.
+already SENT_TO_PROCESSING is resumed by the handoff scan (any
+file still missing on FTP 2 is re-copied; files the processor
+already finished are left for the completion scan); a run left
+RECEIVED by a crashed handoff is re-processed on the next scan.
+A file that waits in SENT_TO_PROCESSING longer than
+`stale_after_seconds` (default 86400 = 24h, 0 disables) gets
+one alert email naming the file, job, run_id, and wait time;
+with no `notify` section the alert is an error log line
+instead. `--reconcile` still reports in-flight runs on demand.
 
 **Completion** — the watcher polls FTP 2 `<job>/success/` and
 `<job>/failed/` for files matching recorded SENT_TO_PROCESSING
@@ -275,7 +292,7 @@ ruff check src tests
 ruff format --check src tests
 ```
 
-All with local folders and fake transports/SMTP (no agent, no
+71 tests. All with local folders and fake transports/SMTP (no agent, no
 server needed): handoff copies a verified batch to FTP 2 (and
 never the manifest), an incomplete manifest is left alone, a
 corrupt file is quarantined, a re-dropped file is archived as a
@@ -288,4 +305,12 @@ the reverse flow stages from the share to outgoing (single file
 and a multi-file batch in one job, duplicate archived), plus the
 config parser (`test_config.py`: valid shapes and defaults,
 every failure mode, the example config parses, `--check-config`
-exit codes) and file logging (`test_logging.py`).
+exit codes) and file logging (`test_logging.py`). Transfer
+quality (`test_transfer_quality.py`): hash/size mismatch after
+upload raises and no manifest follows, the handoff records
+before copying, a resuming run re-copies only missing files and
+never a finished one, transient failures retry with backoff and
+validation errors never retry, a stuck file alerts once (and
+retries after a failed send), multi-file uploads run
+concurrently, and the per-run summary lands in the log and the
+completion email.

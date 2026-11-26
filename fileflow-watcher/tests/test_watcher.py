@@ -61,9 +61,14 @@ def _fake_smtp(monkeypatch):
 class RecordingTransport(LocalTransport):
     """A local transport that records what the use case asked it to do."""
 
-    def __init__(self, root):
+    def __init__(self, root, calls=None):
         super().__init__(root)
-        self.calls: list[tuple] = []
+        self.calls: list[tuple] = calls if calls is not None else []
+
+    def clone(self):
+        # Clones share the calls list: parallel uploads by worker
+        # clones are recorded on the same list, in arrival order.
+        return RecordingTransport(self.root, self.calls)
 
     def upload(self, local_path, remote_dir, remote_name):
         self.calls.append(("upload", remote_dir, remote_name))
@@ -224,11 +229,19 @@ def test_changed_file_copies_again(tmp_path: Path):
     _seed_incoming(tmp_path, files={"report.csv": "id,amount\n1,10\n"})
     cfg = _watcher_cfg(tmp_path)
     assert _scan_once(cfg) == {"SENT_TO_PROCESSING": 1}
-    _seed_incoming(tmp_path, run_id="bbbbbbbbbbbbbbbb", files={"report.csv": "id,amount\n1,99\n"})
+    # A changed file with the SAME size must still re-copy: the old
+    # bytes on FTP 2 cannot be told apart by size alone, so the
+    # skip is hash-based -- the remote file is downloaded back and
+    # compared against the recorded SHA-256.
+    _seed_incoming(tmp_path, run_id="bbbbbbbbbbbbbbbb", files={"report.csv": "id,amount\n2,10\n"})
     assert _scan_once(cfg) == {"SENT_TO_PROCESSING": 1}
     assert (tmp_path / "ftp2" / "processing" / "daily-report" / "report.csv").read_text(
         encoding="utf-8"
-    ) == "id,amount\n1,99\n"
+    ) == "id,amount\n2,10\n"
+    # ...and the new run completes successfully on the new content.
+    _processor_finish(tmp_path, "report.csv", "success")
+    assert _scan_once(cfg) == {"COMPLETED": 1}
+    assert _ledger_run(tmp_path, "bbbbbbbbbbbbbbbb").state == "COMPLETED"
 
 
 def test_unknown_job_is_dead_lettered(tmp_path: Path):
@@ -256,10 +269,13 @@ def test_handoff_goes_through_transports(tmp_path: Path):
     finally:
         repo.close()
     uploads = [c for c in processing.calls if c[0] == "upload"]
-    assert uploads == [
-        ("upload", "processing/daily-report", "a.csv"),
-        ("upload", "processing/daily-report", "b.csv"),
-    ]
+    # Order is not guaranteed: multi-file uploads run concurrently.
+    assert sorted(uploads) == sorted(
+        [
+            ("upload", "processing/daily-report", "a.csv"),
+            ("upload", "processing/daily-report", "b.csv"),
+        ]
+    )
     assert ("makedirs", "processing/daily-report") in processing.calls
     assert not any(c[2].endswith(".manifest.json") for c in uploads)
 
