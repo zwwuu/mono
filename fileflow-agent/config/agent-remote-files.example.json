@@ -8,7 +8,7 @@
     "username": "fileflow"
   },
   "job": "ftp-inbox",
-  "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "db_url": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
   "rename_pattern": "{name}{ext}",
   "source": {

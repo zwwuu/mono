@@ -6,7 +6,7 @@
         "transport": "local"
     },
     "job": "monthly-report",
-    "ledger_db": "demo-out/agent.db",
+    "db_url": "demo-out/agent.db",
     "log_file": "demo-out/agent.log",
     "procedure": "rename-pdf-report",
     "procedures_module": "procedures_local",

@@ -9,7 +9,7 @@
         "username": "fileflow"
     },
     "job": "monthly-report",
-    "ledger_db": "/var/lib/fileflow-agent/agent.db",
+    "db_url": "/var/lib/fileflow-agent/agent.db",
     "procedure": "rename-pdf-report",
     "procedures_module": "procedures_local",
     "rename_pattern": "{name}{ext}",

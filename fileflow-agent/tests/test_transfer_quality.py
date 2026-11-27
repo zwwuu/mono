@@ -15,10 +15,8 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fileflow_contract import file_entry, write_manifest
-
-from fileflow_agent.application.download import DownloadAndUploadUseCase
-from fileflow_agent.application.pickup import PickupUseCase
+from fileflow_agent.application.pull import PullUseCase
+from fileflow_agent.application.push import PushUseCase
 from fileflow_agent.infrastructure.config import parse_config
 from fileflow_agent.infrastructure.persistence import SqlAlchemyRunRepository
 from fileflow_agent.infrastructure.retry import with_retries
@@ -33,7 +31,7 @@ def _agent_cfg(tmp_path: Path, source: Path) -> dict:
         "procedure": "normalize-csv",
         "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
+        "db_url": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
     }
 
@@ -65,13 +63,28 @@ class FakeSource:
         return [dest]
 
 
-def _run_download(cfg: dict, transport, source, *, sleep=None, notifier=None):
+def _run_pull(cfg: dict, source, *, sleep=None, notifier=None):
     parsed = parse_config(cfg)
-    repo = SqlAlchemyRunRepository(parsed.ledger_db)
+    repo = SqlAlchemyRunRepository(parsed.db_url)
     try:
-        use_case = DownloadAndUploadUseCase(
+        use_case = PullUseCase(
             parsed,
             source=source,
+            repository=repo,
+            notifier=notifier,
+            sleep=sleep,
+        )
+        return use_case.run()
+    finally:
+        repo.close()
+
+
+def _run_push(cfg: dict, transport, *, sleep=None, notifier=None):
+    parsed = parse_config(cfg)
+    repo = SqlAlchemyRunRepository(parsed.db_url)
+    try:
+        use_case = PushUseCase(
+            parsed,
             transport=transport,
             repository=repo,
             notifier=notifier,
@@ -187,43 +200,43 @@ class FlakyTransport(LocalTransport):
         return super().upload(local_path, remote_dir, remote_name)
 
 
-def test_download_run_retries_transient_upload_failure(tmp_path: Path):
+def test_push_run_retries_transient_upload_failure(tmp_path: Path):
     source = tmp_path / "daily.csv"
     source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
     cfg = _agent_cfg(tmp_path, source)
+    assert _run_pull(cfg, FakeSource(source))["status"] == "STAGED"
     transport = FlakyTransport(tmp_path / "ftp", fail_times=2)
     sleeps: list[float] = []
-    result = _run_download(
-        cfg,
-        transport,
-        FakeSource(source),
-        sleep=sleeps.append,
-    )
+    result = _run_push(cfg, transport, sleep=sleeps.append)
     assert result["status"] == "UPLOADED"
     assert sleeps == [1.0, 2.0]
     incoming = tmp_path / "ftp" / "incoming" / "daily-report"
     assert len(list(incoming.glob("*.manifest.json"))) == 1
 
 
-def test_download_run_fails_after_exhausting_retries(tmp_path: Path):
+def test_push_run_fails_after_exhausting_retries(tmp_path: Path):
     source = tmp_path / "daily.csv"
     source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
     cfg = _agent_cfg(tmp_path, source)
+    pulled = _run_pull(cfg, FakeSource(source))
+    assert pulled["status"] == "STAGED"
     transport = FlakyTransport(tmp_path / "ftp", fail_times=99)
     sleeps: list[float] = []
-    with pytest.raises(OSError, match="simulated blip"):
-        _run_download(cfg, transport, FakeSource(source), sleep=sleeps.append)
+    with pytest.raises(RuntimeError, match=pulled["run_id"]):
+        _run_push(cfg, transport, sleep=sleeps.append)
     assert transport.upload_calls == 3  # 3 attempts, then give up
     assert sleeps == [1.0, 2.0]
+    # The batch stays staged for the next push.
+    assert (tmp_path / "staging" / pulled["run_id"]).exists()
 
 
-def test_download_run_does_not_retry_validation_errors(tmp_path: Path):
+def test_pull_run_does_not_retry_validation_errors(tmp_path: Path):
     source = tmp_path / "daily.csv"
     source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
     cfg = _agent_cfg(tmp_path, source)
     fake_source = FakeSource(source, error=ValueError("bad input"))
     with pytest.raises(ValueError, match="bad input"):
-        _run_download(cfg, LocalTransport(tmp_path / "ftp"), fake_source, sleep=lambda s: None)
+        _run_pull(cfg, fake_source, sleep=lambda s: None)
     assert fake_source.calls == 1
 
 
@@ -286,15 +299,32 @@ def test_single_file_upload_uses_the_same_transport(tmp_path: Path):
 # -- (6) per-run transfer summary ----------------------------------------
 
 
-def test_download_summary_in_log_and_email(tmp_path: Path, caplog):
+def test_pull_summary_in_log_and_email(tmp_path: Path, caplog):
     source = tmp_path / "daily.csv"
     source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
     cfg = _agent_cfg(tmp_path, source)
     notifier = FakeNotifier()
     with caplog.at_level(logging.INFO):
-        result = _run_download(
-            cfg, LocalTransport(tmp_path / "ftp"), FakeSource(source), notifier=notifier
-        )
+        result = _run_pull(cfg, FakeSource(source), notifier=notifier)
+    assert result["status"] == "STAGED"
+    assert len(notifier.calls) == 1
+    call = notifier.calls[0]
+    assert call["status"] == "STAGED"
+    assert call["summary"] is not None
+    assert "1 file(s)," in call["summary"]
+    assert "bytes in" in call["summary"]
+    assert "-> " in call["summary"] and "staging" in call["summary"]
+    assert any(call["summary"] in record.message for record in caplog.records)
+
+
+def test_push_summary_in_log_and_email(tmp_path: Path, caplog):
+    source = tmp_path / "daily.csv"
+    source.write_text(" id , amount \n 1 , 10.5 \n", encoding="utf-8")
+    cfg = _agent_cfg(tmp_path, source)
+    assert _run_pull(cfg, FakeSource(source))["status"] == "STAGED"
+    notifier = FakeNotifier()
+    with caplog.at_level(logging.INFO):
+        result = _run_push(cfg, LocalTransport(tmp_path / "ftp"), notifier=notifier)
     assert result["status"] == "UPLOADED"
     assert len(notifier.calls) == 1
     call = notifier.calls[0]
@@ -304,101 +334,3 @@ def test_download_summary_in_log_and_email(tmp_path: Path, caplog):
     assert "bytes in" in call["summary"]
     assert "-> incoming/daily-report" in call["summary"]
     assert any(call["summary"] in record.message for record in caplog.records)
-
-
-class FakeUploader:
-    """Records website uploads; never opens a socket."""
-
-    def __init__(self):
-        self.uploaded: list[tuple[str, list[str]]] = []
-
-    def upload_many(self, file_paths, *, run_id, job):
-        self.uploaded.append((run_id, [p.name for p in file_paths]))
-
-
-def _seed_outgoing(tmp_path: Path) -> None:
-    out_dir = tmp_path / "ftp" / "outgoing" / "daily-report"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    data = out_dir / "to-upload.csv"
-    data.write_text("id,amount\n7,99\n", encoding="utf-8")
-    manifest = {
-        "version": 1,
-        "run_id": "0123456789abcdef",
-        "job": "daily-report",
-        "direction": "outbound",
-        "idempotency_key": "daily-report|0123456789abcdef",
-        "files": [file_entry(data, "output")],
-    }
-    write_manifest(out_dir / "to-upload.manifest.json", manifest)
-
-
-def _pickup_cfg(tmp_path: Path) -> dict:
-    return {
-        "job": "daily-report",
-        "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
-        "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
-        "deliver": {"upload_url": "http://127.0.0.1:9/upload", "form_field": "file"},
-    }
-
-
-def test_pickup_summary_in_log_and_email(tmp_path: Path, caplog):
-    _seed_outgoing(tmp_path)
-    cfg = parse_config(_pickup_cfg(tmp_path))
-    repo = SqlAlchemyRunRepository(cfg.ledger_db)
-    uploader = FakeUploader()
-    notifier = FakeNotifier()
-    try:
-        use_case = PickupUseCase(
-            cfg,
-            transport=LocalTransport(tmp_path / "ftp"),
-            repository=repo,
-            uploader=uploader,
-            notifier=notifier,
-            sleep=lambda s: None,
-        )
-        with caplog.at_level(logging.INFO):
-            assert use_case.run() == {"UPLOADED_TO_WEBSITE": 1}
-    finally:
-        repo.close()
-    assert len(notifier.calls) == 1
-    call = notifier.calls[0]
-    assert call["status"] == "UPLOADED_TO_WEBSITE"
-    assert "1 file(s)," in call["summary"]
-    assert "bytes in" in call["summary"]
-    assert "-> http://127.0.0.1:9/upload" in call["summary"]
-    assert any(call["summary"] in record.message for record in caplog.records)
-
-
-def test_pickup_run_retries_transient_website_failure(tmp_path: Path):
-    _seed_outgoing(tmp_path)
-    cfg = parse_config(_pickup_cfg(tmp_path))
-    repo = SqlAlchemyRunRepository(cfg.ledger_db)
-
-    class FlakyUploader(FakeUploader):
-        def __init__(self):
-            super().__init__()
-            self.calls = 0
-
-        def upload_many(self, file_paths, *, run_id, job):
-            self.calls += 1
-            if self.calls <= 2:
-                raise OSError("website blip")
-            return super().upload_many(file_paths, run_id=run_id, job=job)
-
-    uploader = FlakyUploader()
-    sleeps: list[float] = []
-    try:
-        use_case = PickupUseCase(
-            cfg,
-            transport=LocalTransport(tmp_path / "ftp"),
-            repository=repo,
-            uploader=uploader,
-            notifier=FakeNotifier(),
-            sleep=sleeps.append,
-        )
-        assert use_case.run() == {"UPLOADED_TO_WEBSITE": 1}
-    finally:
-        repo.close()
-    assert uploader.calls == 3
-    assert sleeps == [1.0, 2.0]

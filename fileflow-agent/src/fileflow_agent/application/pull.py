@@ -1,4 +1,4 @@
-"""Application -- download + upload use case (forward flow).
+"""Application -- pull use case (first stage of the forward flow).
 
 One run, no approval step:
   1. download the source file(s) to ``<staging>/<run_id>`` -- one
@@ -10,7 +10,7 @@ One run, no approval step:
      files already processed in an earlier completed run (same job
      + name + hash, recorded in the ledger) are skipped -- a
      re-run, a re-drop, or a loop pass over an unchanged drop
-     folder does not upload them again. A changed file (new hash)
+     folder does not download them again. A changed file (new hash)
      is fresh and is processed. If nothing is fresh, the run is
      SKIPPED: no manifest, no upload, no new ledger row;
   3. first rename / format each one, using the procedure named in
@@ -21,17 +21,18 @@ One run, no approval step:
      hash, because no single hash can name a set of files. The
      idempotency key is ``job|run_id``: the run_id is the run's
      identity, and it is unique per run without any content hash;
-  5. upload every output file, then the manifest *last*, via .part +
-     rename, to ``incoming/<job>/`` on the FTP server;
-  6. verify the remote sizes, then delete the staging copy.
-     The staging copy is kept until the upload is verified -- the
-     sender never deletes before the receiver has the bytes.
-     The run is recorded UPLOADED with the list of files it
-     uploaded (job + name + hash each), which is what the next
-     run's skip check reads.
+  5. record the run STAGED with the list of files it pulled (job +
+     name + hash each), which is what the next run's skip check
+     reads -- and leave the batch in staging for the push stage
+     to upload. Nothing is uploaded here.
 
-The use case only talks to ports (Source, Transport, RunRepository)
-and to the procedure registry. It never opens a socket or a database
+In dry-run mode the pull runs for real into a temporary staging
+area (``<staging>/dry-run-<run_id>``) so content checks run, but
+no ledger row is written and no email is sent; the caller discards
+the temporary staging afterwards.
+
+The use case only talks to ports (Source, RunRepository) and to
+the procedure registry. It never opens a socket or a database
 itself, so it can be tested with a local transport and a throwaway
 SQLite file -- which is exactly what the test suite does.
 """
@@ -57,7 +58,7 @@ from fileflow_contract import (
 )
 
 from ..domain.integrity import Context
-from ..domain.ports import Notifier, RunRepository, Source, Transport
+from ..domain.ports import Notifier, RunRepository, Source
 from ..domain.procedures import get_procedure
 from ..infrastructure.config import AgentConfig, source_reference
 from ..infrastructure.filesystem import log, read_csv_rows
@@ -73,25 +74,25 @@ def validate_input(path: Path, expect_csv: bool) -> None:
             raise ValueError(f"not a parseable CSV: {path.name}")
 
 
-class DownloadAndUploadUseCase:
+class PullUseCase:
     def __init__(
         self,
         cfg: AgentConfig,
         *,
         source: Source,
-        transport: Transport,
         repository: RunRepository,
         procedure_lookup=get_procedure,
         notifier: Notifier | None = None,
         sleep: Callable[[float], None] | None = None,
+        dry_run: bool = False,
     ):
         self.cfg = cfg
         self.source = source
-        self.transport = transport
         self.repository = repository
         self.procedure_lookup = procedure_lookup
         self.notifier = notifier
         self._sleep = sleep or time.sleep
+        self.dry_run = dry_run
 
     def _notify(
         self,
@@ -103,7 +104,7 @@ class DownloadAndUploadUseCase:
         error: str | None = None,
         summary: str | None = None,
     ) -> None:
-        if self.notifier is not None:
+        if self.notifier is not None and not self.dry_run:
             self.notifier.notify(
                 job=self.cfg.job,
                 run_id=run_id,
@@ -119,9 +120,12 @@ class DownloadAndUploadUseCase:
         job = cfg.job
         run_id = new_run_id()
         started = time.monotonic()
-        # One Context per run, from the job's variables only.
+        # One Context per run, from the job's variables only. A
+        # dry run stages into a clearly-marked folder the push
+        # stage never picks up on its own.
         ctx = Context(cfg.variables)
-        staging = Path(ctx.local_path(cfg.staging_dir)) / run_id
+        staging_name = f"dry-run-{run_id}" if self.dry_run else run_id
+        staging = Path(ctx.local_path(cfg.staging_dir)) / staging_name
         staging.mkdir(parents=True, exist_ok=True)
         log.info("run %s job=%s starting", run_id, job)
         try:
@@ -148,16 +152,19 @@ class DownloadAndUploadUseCase:
                     "outputs": [],
                     "skipped": [],
                     "status": "SKIPPED",
+                    "staging": str(staging),
                 }
             fresh: list[tuple[Path, str]] = []
             skipped: list[str] = []
+            # Only STAGED/UPLOADED runs count: a file from a failed
+            # run is fresh and retries, and a file already staged
+            # (pulled but not yet pushed) must not be pulled again.
+            recorded = self.repository.list_by_state("STAGED") + self.repository.list_by_state(
+                "UPLOADED"
+            )
             for path in downloaded:
                 input_sha = sha256_file(path)
-                # Only UPLOADED runs count: a file from a failed run
-                # is fresh and retries.
-                if file_already_recorded(
-                    self.repository.list_by_state("UPLOADED"), job, path.name, input_sha
-                ):
+                if file_already_recorded(recorded, job, path.name, input_sha):
                     log.info("run %s: %s already processed, skipped", run_id, path.name)
                     skipped.append(path.name)
                     continue
@@ -179,6 +186,7 @@ class DownloadAndUploadUseCase:
                     "outputs": [],
                     "skipped": skipped,
                     "status": "SKIPPED",
+                    "staging": str(staging),
                 }
 
             # 3. first rename / format each fresh file (agent-side procedure)
@@ -224,65 +232,48 @@ class DownloadAndUploadUseCase:
             manifest_path = staging / f"{run_id}.manifest.json"
             write_manifest(manifest_path, manifest)
 
-            # 5-6. upload every output first, manifest last; verify; clean up.
-            # The destination is a templated directory when the config
-            # names one (destination.directory, for a direct drop);
-            # otherwise the classic incoming/<job>/ the watcher scans.
-            dir_template = cfg.destination.directory
-            if dir_template:
-                remote_dir = ctx.remote_path(dir_template)
-            else:
-                remote_dir = f"incoming/{job}"
-            # A transient upload failure is retried (OSError only);
-            # a hash mismatch is a ValueError and fails immediately.
-            with_retries(
-                lambda: self.transport.upload_many_with_manifest(
-                    outputs, manifest_path, remote_dir
-                ),
-                sleep=self._sleep,
-            )
-            self.repository.claim(
-                run_id=run_id,
-                job=job,
-                idempotency_key=manifest.idempotency_key,
-            )
-            # Record the uploaded files on the run: the next run's skip
-            # check reads this list.
-            self.repository.set_state(
-                run_id,
-                "UPLOADED",
-                files=[{"name": path.name, "sha256": sha} for path, sha in fresh],
-                outputs=[name for _, name in outputs],
-            )
-            log.info(
-                "run %s uploaded %d file(s) to %s",
-                run_id,
-                len(outputs),
-                remote_dir,
-            )
+            # 5. record the run STAGED with the pulled files: the next
+            # run's skip check reads this list. The batch stays in
+            # staging for the push stage. A dry run writes nothing.
             total_bytes = sum(output.stat().st_size for output, _ in outputs)
             summary = (
-                f"run {run_id} job={job} UPLOADED {len(outputs)} file(s), "
-                f"{total_bytes} bytes in {time.monotonic() - started:.1f}s -> {remote_dir}"
+                f"run {run_id} job={job} STAGED {len(outputs)} file(s), "
+                f"{total_bytes} bytes in {time.monotonic() - started:.1f}s -> {staging}"
             )
             log.info(summary)
-            self._notify(
-                run_id=run_id,
-                status="UPLOADED",
-                files=[name for _, name in outputs],
-                destination=remote_dir,
-                summary=summary,
-            )
-            shutil.rmtree(staging)
+            if not self.dry_run:
+                self.repository.claim(
+                    run_id=run_id,
+                    job=job,
+                    idempotency_key=manifest.idempotency_key,
+                )
+                # Record the pulled files on the run: the next run's skip
+                # check reads this list.
+                self.repository.set_state(
+                    run_id,
+                    "STAGED",
+                    files=[{"name": path.name, "sha256": sha} for path, sha in fresh],
+                    outputs=[name for _, name in outputs],
+                )
+                self._notify(
+                    run_id=run_id,
+                    status="STAGED",
+                    files=[name for _, name in outputs],
+                    destination=str(staging),
+                    summary=summary,
+                )
             return {
                 "run_id": run_id,
                 "job": job,
                 "outputs": [name for _, name in outputs],
                 "skipped": skipped,
-                "status": "UPLOADED",
+                "status": "STAGED",
+                "staging": str(staging),
             }
         except Exception as e:
-            # Keep the staging dir for inspection; never upload a bad file.
+            # Keep the staging dir for inspection; never stage a bad file.
+            # A dry run leaves nothing behind either way -- the caller
+            # discards the temporary staging, failed or not.
             self._notify(run_id=run_id, status="FAILED", files=[], error=str(e))
             log.error("run %s FAILED: %s (staging kept at %s)", run_id, e, staging)
             raise

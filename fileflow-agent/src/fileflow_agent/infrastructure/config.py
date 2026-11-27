@@ -7,8 +7,8 @@ raises ``ConfigError`` naming the FIRST problem found (missing keys,
 wrong types, unknown keys, unknown source/transport kinds, unknown
 template tokens, out-of-range values) instead of failing halfway
 through a run, after files were already downloaded, with a bare
-KeyError. ``load_config`` reads a file and parses it;
-``--check-config`` runs just this step and exits.
+KeyError. ``load_config`` reads a file and parses it; ``--action validate``
+checks the manifest contract in staging and exits.
 
 The parser checks shape only. It does not check that a named env
 var is set -- the env may be set on the deployment machine, not
@@ -180,14 +180,6 @@ class DestinationConfig:
 
 
 @dataclass(frozen=True)
-class DeliverConfig:
-    upload_url: str = ""
-    form_field: str = "file"
-    auth_env: str | None = None
-    timeout_seconds: int = 60
-
-
-@dataclass(frozen=True)
 class NotifyConfig:
     """One email per completed run. ``from_addr`` is the config key
     ``"from"`` (a Python keyword) and the SMTP login username."""
@@ -201,14 +193,15 @@ class NotifyConfig:
 
 @dataclass(frozen=True)
 class AgentConfig:
-    """One config is one job. ``source`` is None for a pickup-only
-    config; ``deliver`` / ``notify`` / ``log_file`` are None when
-    the config has no pickup section / sends no email / logs to
-    the console only."""
+    """One config is one job. ``source`` is None for a push-only
+    config (a job that only uploads already-staged batches);
+    ``notify`` / ``log_file`` are None when the config sends no
+    email / logs to the console only. ``db_url`` is None when the
+    job runs without a ledger -- pull then re-processes every file
+    on every run, with no dedup."""
 
     job: str
     staging_dir: str
-    ledger_db: str
     destination: DestinationConfig
     source: SourceConfig | None = None
     category: str | None = None
@@ -216,10 +209,10 @@ class AgentConfig:
     procedure: str = "rename-only"
     expect_csv: bool = False
     rename_pattern: str = "{name}{ext}"
-    deliver: DeliverConfig | None = None
     procedures_module: str | None = None
     notify: NotifyConfig | None = None
     log_file: str | None = None
+    db_url: str | None = None
 
 
 # Fields that must be present and non-empty even though the dataclass
@@ -231,7 +224,6 @@ _REQUIRED = {
     (RemoteDirSourceConfig, "remote_dir"),
     (SmbSourceConfig, "server"),
     (SmbSourceConfig, "share"),
-    (DeliverConfig, "upload_url"),
     (NotifyConfig, "smtp_host"),
     (NotifyConfig, "from_addr"),
     (NotifyConfig, "to"),
@@ -381,12 +373,6 @@ def _build(cls, data, where):
         url = kwargs["url"]
         if not url.startswith(("http://", "https://")):
             raise ConfigError(f"{where}: 'url' must start with http:// or https://, got {url!r}")
-    elif cls is DeliverConfig:
-        url = kwargs["upload_url"]
-        if not url.startswith(("http://", "https://")):
-            raise ConfigError(
-                f"{where}: 'upload_url' must start with http:// or https://, got {url!r}"
-            )
     elif cls is RemoteFile:
         name = kwargs["name"]
         if "/" in name or "\\" in name:
@@ -459,13 +445,13 @@ def parse_config(data: object) -> AgentConfig:
         raise ConfigError(f"config: 'rename_pattern' {cfg.rename_pattern!r} is invalid: {e}") from e
     ctx = dict(cfg.variables)
     templates = []
-    # Local paths are templates too (staging_dir, ledger_db,
+    # Local paths are templates too (staging_dir, db_url,
     # log_file): they render against the job context at use time,
     # per run -- so they validate against exactly that context,
     # with no name/ext/run_id extras to render them with.
     for where, template in (
         ("staging_dir", cfg.staging_dir),
-        ("ledger_db", cfg.ledger_db),
+        ("db_url", cfg.db_url),
         ("log_file", cfg.log_file),
     ):
         if template:

@@ -50,15 +50,19 @@ class Run(Base):
 
 class SqlAlchemyRunRepository:
     """RunRepository on SQLite. One session per operation; the engine
-    is created once and disposed on close()."""
+    is created once and disposed on close(). With ``create=False``
+    the database file is never created -- a dry run reads the ledger
+    (an absent file simply has no rows) without leaving one behind."""
 
-    def __init__(self, db_path: str | Path):
+    def __init__(self, db_path: str | Path, *, create: bool = True):
         self.db_path = Path(db_path)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if create:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.engine = create_engine(
             f"sqlite:///{self.db_path}", connect_args={"check_same_thread": False}
         )
-        Base.metadata.create_all(self.engine)
+        if create:
+            Base.metadata.create_all(self.engine)
 
     def close(self) -> None:
         self.engine.dispose()
@@ -111,8 +115,40 @@ class SqlAlchemyRunRepository:
             return {"run_id": row.run_id, "state": row.state} if row else None
 
     def list_by_state(self, state: str) -> list[RunRecord]:
+        if not self.db_path.exists():
+            # A dry-run repository (create=False) on a fresh deploy:
+            # no file, no rows -- and querying would create the file.
+            return []
         with Session(self.engine) as session:
             rows = session.scalars(
                 select(Run).where(Run.state == state).order_by(Run.updated_at)
             ).all()
             return [r.to_record() for r in rows]
+
+
+class NullRunRepository:
+    """RunRepository with no ledger behind it. Every read answers
+    empty (nothing was ever recorded, no key was ever seen) and
+    every write is a no-op, so a job configured without ``db_url``
+    runs without a ledger and without the dedup the ledger gives
+    it: pull re-processes every file on every run. The use cases
+    call this exactly like the SQLAlchemy repository, so no run
+    path branches on whether a ledger exists."""
+
+    def claim(self, *, run_id: str, job: str, idempotency_key: str) -> bool:
+        return True
+
+    def set_state(self, run_id: str, state: str, **detail) -> None:
+        return None
+
+    def get(self, run_id: str) -> RunRecord | None:
+        return None
+
+    def seen_key(self, idempotency_key: str) -> dict | None:
+        return None
+
+    def list_by_state(self, state: str) -> list[RunRecord]:
+        return []
+
+    def close(self) -> None:
+        return None

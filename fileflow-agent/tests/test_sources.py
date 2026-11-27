@@ -19,7 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from fileflow_agent.adapters.cli import build_download_use_case
+from fileflow_agent.adapters.cli import build_pull_use_case, build_push_use_case
 from fileflow_agent.domain.integrity import render_template
 from fileflow_agent.infrastructure.config import (
     PlaywrightSourceConfig,
@@ -51,12 +51,26 @@ from fileflow_agent.infrastructure.transport import resolve_password
 
 
 def _run_once(cfg: dict) -> dict:
-    use_case, transport, repository = build_download_use_case(parse_config(cfg))
+    """A full run: pull, then push. Returns the pull's result with
+    the push's status, so end-to-end tests read like the old
+    single run."""
+    use_case, transport, repository = build_pull_use_case(parse_config(cfg))
     try:
-        return use_case.run()
+        pulled = use_case.run()
     finally:
-        transport.close()
+        if transport is not None:
+            transport.close()
         repository.close()
+    if pulled["status"] != "STAGED":
+        return pulled
+    use_case, transport, repository = build_push_use_case(parse_config(cfg))
+    try:
+        pushed = use_case.run()
+    finally:
+        if transport is not None:
+            transport.close()
+        repository.close()
+    return {**pulled, "status": pushed["status"]}
 
 
 def _make_remote(root: Path, files: dict[str, str], old: bool = True) -> None:
@@ -111,7 +125,7 @@ def test_remote_dir_end_to_end_with_skip(tmp_path: Path):
         "procedure": "normalize-csv",
         "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
+        "db_url": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "ftp")},
     }
     assert _run_once(cfg)["status"] == "UPLOADED"
@@ -638,7 +652,7 @@ def test_remote_files_end_to_end_direct_drop(tmp_path: Path):
         "procedure": "normalize-csv",
         "rename_pattern": "{name}{ext}",
         "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
+        "db_url": str(tmp_path / "agent.db"),
         "destination": {
             "transport": "local",
             "root": str(tmp_path / "dest"),
@@ -1065,7 +1079,7 @@ def test_playwright_real_browser_end_to_end(tmp_path: Path):
             "expect_csv": True,
             "rename_pattern": "{name}{ext}",
             "staging_dir": str(tmp_path / "staging"),
-            "ledger_db": str(tmp_path / "agent.db"),
+            "db_url": str(tmp_path / "agent.db"),
             "destination": {"transport": "local", "root": str(tmp_path / "dest")},
         }
         assert _run_once(cfg)["status"] == "UPLOADED"
@@ -1140,7 +1154,7 @@ def test_remote_files_all_optional_missing_skips_run(tmp_path: Path):
             "files": [{"directory": "inbox", "name": "opt.csv", "optional": True}],
         },
         "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
+        "db_url": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "dest")},
     }
     assert _run_once(cfg)["status"] == "SKIPPED"
@@ -1179,7 +1193,7 @@ def test_local_dir_empty_skips_run(tmp_path: Path):
         "job": "drop",
         "source": {"type": "local-dir", "directory": str(drop)},
         "staging_dir": str(tmp_path / "staging"),
-        "ledger_db": str(tmp_path / "agent.db"),
+        "db_url": str(tmp_path / "agent.db"),
         "destination": {"transport": "local", "root": str(tmp_path / "dest")},
     }
     assert _run_once(cfg)["status"] == "SKIPPED"

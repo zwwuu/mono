@@ -7,7 +7,7 @@
   },
   "expect_csv": true,
   "job": "smb-inbox",
-  "ledger_db": "/var/lib/fileflow-agent/agent.db",
+  "db_url": "/var/lib/fileflow-agent/agent.db",
   "procedure": "normalize-csv",
   "rename_pattern": "{name}{ext}",
   "source": {

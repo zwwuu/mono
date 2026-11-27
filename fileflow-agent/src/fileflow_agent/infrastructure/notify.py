@@ -1,10 +1,10 @@
 """Infrastructure -- email notification on run completion.
 
-One email per run, sent when the run finishes: UPLOADED (or
-UPLOADED_TO_WEBSITE in pickup mode) and FAILED. SKIPPED sends
-nothing -- otherwise every --loop tick with nothing new would
-spam the operator. When the config has no ``notify`` section the
-notifier only logs, so a config without email still works.
+One email per run, sent when the run finishes: STAGED (a pull) or
+UPLOADED (a push) and FAILED. SKIPPED sends nothing -- otherwise
+every --loop tick with nothing new would spam the operator. When
+the config has no ``notify`` section the notifier only logs, so a
+config without email still works.
 
 Stdlib smtplib only. STARTTLS on port 587 (the submission port);
 other ports send plain. The SMTP password comes from the env var

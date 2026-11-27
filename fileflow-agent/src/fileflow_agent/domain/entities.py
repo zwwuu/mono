@@ -21,13 +21,11 @@ STATES = (
     "PROCESSING",
     "PROCESSED",
     "PUBLISHED",
+    "STAGED",
     "UPLOADED",
     "FAILED",
     "QUARANTINED",
     "DUPLICATE",
-    # reverse flow (SMB -> FTP outgoing -> website)
-    "OUTBOUND_READY",
-    "UPLOADED_TO_WEBSITE",
 )
 
 

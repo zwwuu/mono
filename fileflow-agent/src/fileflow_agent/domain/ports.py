@@ -88,15 +88,6 @@ class Source(Protocol):
         ...
 
 
-class WebsiteUploader(Protocol):
-    """Upload staged files to the website (pickup mode). One batch
-    goes in a single POST carrying every file."""
-
-    def upload(self, file_path: Path, *, run_id: str, job: str) -> None: ...
-
-    def upload_many(self, file_paths: list[Path], *, run_id: str, job: str) -> None: ...
-
-
 class Procedure(Protocol):
     """A business procedure: read input, write a NEW output file."""
 
@@ -105,8 +96,8 @@ class Procedure(Protocol):
 
 class Notifier(Protocol):
     """Email (or log-only) notification on run completion. One
-    call per run: UPLOADED / UPLOADED_TO_WEBSITE on success,
-    FAILED with the error on failure. SKIPPED is never notified."""
+    call per run: STAGED / UPLOADED on success, FAILED with the
+    error on failure. SKIPPED is never notified."""
 
     def notify(
         self,
